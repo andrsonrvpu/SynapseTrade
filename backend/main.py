@@ -656,3 +656,178 @@ async def get_account_info(
         return {"balance": 14240.50, "equity": 14240.50, "connected": False, "mode": "demo"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ─── Open Positions ──────────────────────────────────────────────────────────
+
+@app.get("/api/v1/positions")
+async def get_open_positions(
+    x_metaapi_token: str = Header(default="demo", alias="X-MetaApi-Token"),
+    x_account_id: str = Header(default="demo", alias="X-Account-Id"),
+):
+    """Get all open positions from broker via MetaApi."""
+    if x_metaapi_token == "demo" or x_account_id == "demo":
+        # Return demo positions for testing
+        import random
+        base_positions = [
+            {
+                "id": "POS-001",
+                "symbol": "XAUUSD",
+                "type": "BUY",
+                "volume": 0.10,
+                "openPrice": 2738.50,
+                "currentPrice": round(2738.50 + random.uniform(-15, 20), 2),
+                "stopLoss": 2720.00,
+                "takeProfit": 2765.00,
+                "profit": round(random.uniform(-80, 180), 2),
+                "openTime": datetime.now(timezone.utc).isoformat(),
+            }
+        ]
+        return {"positions": base_positions, "mode": "demo"}
+
+    try:
+        import httpx
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                f"{METAAPI_URL}/users/current/accounts/{x_account_id}/positions",
+                headers={"auth-token": x_metaapi_token},
+                timeout=15,
+            )
+        if resp.status_code == 200:
+            positions = resp.json()
+            return {"positions": positions, "mode": "live"}
+        else:
+            raise HTTPException(status_code=resp.status_code, detail=resp.text)
+    except ImportError:
+        return {"positions": [], "mode": "fallback"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ─── Trade History ───────────────────────────────────────────────────────────
+
+@app.get("/api/v1/history")
+async def get_trade_history(
+    limit: int = 50,
+    x_metaapi_token: str = Header(default="demo", alias="X-MetaApi-Token"),
+    x_account_id: str = Header(default="demo", alias="X-Account-Id"),
+):
+    """Get closed trade history from broker via MetaApi."""
+    if x_metaapi_token == "demo" or x_account_id == "demo":
+        # Return demo history
+        demo_history = [
+            {
+                "id": f"HIST-{i:03d}",
+                "symbol": ["XAUUSD", "EURUSD", "BTCUSDT", "NAS100"][i % 4],
+                "type": "BUY" if i % 2 == 0 else "SELL",
+                "volume": round(0.05 + (i % 5) * 0.05, 2),
+                "openPrice": 2740.0 - i * 2.5,
+                "closePrice": 2740.0 - i * 2.5 + (12.0 if i % 2 == 0 else -8.0),
+                "stopLoss": 2720.0,
+                "takeProfit": 2770.0,
+                "profit": round((12.0 if i % 2 == 0 else -8.0) * (0.05 + (i % 5) * 0.05) * 100, 2),
+                "openTime": (datetime.now(timezone.utc).replace(microsecond=0).isoformat()),
+                "closeTime": (datetime.now(timezone.utc).replace(microsecond=0).isoformat()),
+                "comment": f"SynapseTrade|1.5%|Demo",
+            }
+            for i in range(min(limit, 10))
+        ]
+        return {
+            "history": demo_history,
+            "total_profit": round(sum(h["profit"] for h in demo_history), 2),
+            "win_rate": 62.5,
+            "mode": "demo",
+        }
+
+    try:
+        import httpx
+        from_time = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0).isoformat()
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                f"{METAAPI_URL}/users/current/accounts/{x_account_id}/history-deals/time/{from_time}/{datetime.now(timezone.utc).isoformat()}",
+                headers={"auth-token": x_metaapi_token},
+                timeout=20,
+            )
+        if resp.status_code == 200:
+            deals = resp.json()
+            # Calculate total profit and win rate
+            total_profit = sum(d.get("profit", 0) for d in deals)
+            wins = sum(1 for d in deals if d.get("profit", 0) > 0)
+            win_rate = (wins / len(deals) * 100) if deals else 0
+            return {
+                "history": deals[:limit],
+                "total_profit": round(total_profit, 2),
+                "win_rate": round(win_rate, 1),
+                "mode": "live",
+            }
+        else:
+            raise HTTPException(status_code=resp.status_code, detail=resp.text)
+    except ImportError:
+        return {"history": [], "total_profit": 0, "win_rate": 0, "mode": "fallback"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ─── Close Position ──────────────────────────────────────────────────────────
+
+@app.post("/api/v1/close-position")
+async def close_position(
+    position_id: str,
+    x_metaapi_token: str = Header(default="demo", alias="X-MetaApi-Token"),
+    x_account_id: str = Header(default="demo", alias="X-Account-Id"),
+):
+    """Close a specific open position."""
+    if x_metaapi_token == "demo" or x_account_id == "demo":
+        return {"success": True, "message": f"Demo position {position_id} closed", "mode": "demo"}
+
+    try:
+        import httpx
+        async with httpx.AsyncClient() as client:
+            resp = await client.delete(
+                f"{METAAPI_URL}/users/current/accounts/{x_account_id}/positions/{position_id}",
+                headers={"auth-token": x_metaapi_token},
+                timeout=15,
+            )
+        if resp.status_code in (200, 204):
+            return {"success": True, "message": f"Position {position_id} closed", "mode": "live"}
+        else:
+            raise HTTPException(status_code=resp.status_code, detail=resp.text)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ─── Auto-Trading Control ─────────────────────────────────────────────────────
+
+# In-memory auto-trading state (per session)
+auto_trading_state: dict = {
+    "enabled": False,
+    "min_confidence": 82,
+    "trades_today": 0,
+    "last_signal": None,
+}
+
+
+@app.post("/api/v1/auto-trade/start")
+async def start_auto_trading(
+    min_confidence: float = 82.0,
+    api_key: str = Depends(verify_api_key),
+):
+    """Enable auto-trading mode — AI executes orders automatically."""
+    auto_trading_state["enabled"] = True
+    auto_trading_state["min_confidence"] = min_confidence
+    print(f"[AutoTrading] Started — min confidence: {min_confidence}%")
+    return {"enabled": True, "min_confidence": min_confidence, "message": "Auto-trading activated"}
+
+
+@app.post("/api/v1/auto-trade/stop")
+async def stop_auto_trading(api_key: str = Depends(verify_api_key)):
+    """Disable auto-trading mode."""
+    auto_trading_state["enabled"] = False
+    print("[AutoTrading] Stopped")
+    return {"enabled": False, "trades_today": auto_trading_state["trades_today"], "message": "Auto-trading stopped"}
+
+
+@app.get("/api/v1/auto-trade/status")
+async def auto_trading_status():
+    """Get current auto-trading state."""
+    return auto_trading_state

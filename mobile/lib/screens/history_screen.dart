@@ -1,313 +1,341 @@
+import 'dart:convert';
+import 'dart:ui';
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+import 'package:provider/provider.dart';
+import '../providers/app_provider.dart';
 import '../theme/synapse_theme.dart';
 import '../widgets/glass_card.dart';
 
-/// History screen — Stitch historial_de_señales design.
-/// Stats card with Win Rate, Total Signals, Profit Streak.
-/// Scrollable feed of past signal cards with sparklines.
-class HistoryScreen extends StatelessWidget {
+/// History screen — pulls real trade history from broker via backend.
+class HistoryScreen extends StatefulWidget {
   const HistoryScreen({super.key});
 
   @override
+  State<HistoryScreen> createState() => _HistoryScreenState();
+}
+
+class _HistoryScreenState extends State<HistoryScreen> {
+  bool _loading = true;
+  List<Map<String, dynamic>> _history = [];
+  double _totalProfit = 0;
+  double _winRate = 0;
+  String _mode = 'demo';
+
+  static const String _baseUrl = 'http://192.168.20.15:8000/api/v1';
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchHistory();
+  }
+
+  Future<void> _fetchHistory() async {
+    final provider = context.read<AppProvider>();
+    setState(() => _loading = true);
+
+    try {
+      final resp = await http.get(
+        Uri.parse('$_baseUrl/history?limit=50'),
+        headers: {
+          'X-API-KEY': 'synapse-dev-key-2026',
+          if (provider.metaApiToken.isNotEmpty) 'X-MetaApi-Token': provider.metaApiToken,
+          if (provider.metaApiAccountId.isNotEmpty) 'X-Account-Id': provider.metaApiAccountId,
+        },
+      ).timeout(const Duration(seconds: 12));
+
+      if (resp.statusCode == 200) {
+        final data = json.decode(resp.body);
+        setState(() {
+          _history = List<Map<String, dynamic>>.from(data['history'] ?? []);
+          _totalProfit = (data['total_profit'] ?? 0).toDouble();
+          _winRate = (data['win_rate'] ?? 0).toDouble();
+          _mode = data['mode'] ?? 'demo';
+          _loading = false;
+        });
+        return;
+      }
+    } catch (e) {
+      debugPrint('[History] Error: $e — using provider signals');
+    }
+
+    // Fallback: use signals from provider
+    final signals = context.read<AppProvider>().signals;
+    final closed = signals.where((s) => s.pnl != null).toList();
+    final profit = closed.fold(0.0, (sum, s) => sum + (s.pnl ?? 0));
+    final wins = closed.where((s) => (s.pnl ?? 0) > 0).length;
+    setState(() {
+      _history = closed.map((s) => {
+        'id': s.id,
+        'symbol': s.symbol,
+        'type': s.direction,
+        'profit': s.pnl ?? 0,
+        'openPrice': s.entryPrice,
+        'closePrice': s.takeProfit1,
+        'volume': 0.1,
+        'comment': s.pattern,
+      }).toList();
+      _totalProfit = profit;
+      _winRate = closed.isNotEmpty ? wins / closed.length * 100 : 0;
+      _mode = 'demo';
+      _loading = false;
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final wins = _history.where((h) => (h['profit'] as num? ?? 0) > 0).length;
+    final losses = _history.length - wins;
+
     return CustomScrollView(
       physics: const BouncingScrollPhysics(),
       slivers: [
         const SliverToBoxAdapter(child: SizedBox(height: 16)),
-        // ── Stats Section ──
-        SliverToBoxAdapter(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 24),
-            child: _buildStatsCard(),
-          ),
-        ),
-        const SliverToBoxAdapter(child: SizedBox(height: 32)),
-        // ── List Header ──
+
+        // ── Header ──────────────────────────────────────────────────────────
         SliverToBoxAdapter(
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 24),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              crossAxisAlignment: CrossAxisAlignment.end,
               children: [
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('Signal Stream', style: SynapseTheme.headline(fontSize: 24, letterSpacing: -0.5)),
-                    const SizedBox(height: 4),
-                    Text('Real-time performance audit', style: SynapseTheme.label(fontSize: 14)),
-                  ],
-                ),
-                Row(
-                  children: [
-                    _iconButton(Icons.filter_list),
-                    const SizedBox(width: 8),
-                    _iconButton(Icons.search),
-                  ],
+                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text('Historial', style: SynapseTheme.headline(fontSize: 28, letterSpacing: -0.5)),
+                  const SizedBox(height: 4),
+                  Row(children: [
+                    Container(
+                      width: 7, height: 7,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: _mode == 'live' ? const Color(0xFFFF4C6E) : SynapseTheme.primaryContainer,
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      _mode == 'live' ? 'Datos reales del broker' : 'Modo Demo',
+                      style: SynapseTheme.label(fontSize: 13, color: SynapseTheme.onSurfaceVariant),
+                    ),
+                  ]),
+                ]),
+                GestureDetector(
+                  onTap: _fetchHistory,
+                  child: Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: SynapseTheme.surfaceContainerHigh,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: const Icon(Icons.refresh, size: 18, color: Colors.white70),
+                  ),
                 ),
               ],
             ),
           ),
         ),
-        const SliverToBoxAdapter(child: SizedBox(height: 16)),
-        // ── Signal Cards ──
-        SliverPadding(
-          padding: const EdgeInsets.symmetric(horizontal: 24),
-          sliver: SliverList(
-            delegate: SliverChildListDelegate([
-              _buildSignalCard(
-                symbol: 'XAUUSD',
-                time: 'Closed 14m ago',
-                isBuy: true,
-                pnl: '+ \$2,450.00',
-                entryPrice: '2345.12',
-                exitPrice: '2358.45',
-                icon: Icons.monetization_on,
-                sparklineValues: [0.3, 0.45, 0.4, 0.6, 0.55, 0.85, 1.0],
-              ),
-              const SizedBox(height: 16),
-              _buildSignalCard(
-                symbol: 'BTCUSD',
-                time: 'Closed 2h ago',
-                isBuy: false,
-                pnl: '- \$420.15',
-                entryPrice: '64,210.00',
-                exitPrice: '64,325.50',
-                icon: Icons.attach_money,
-                sparklineValues: [0.8, 0.7, 0.6, 0.5, 0.3, 0.2, 0.1],
-              ),
-              const SizedBox(height: 16),
-              _buildSignalCard(
-                symbol: 'XAUUSD',
-                time: 'Closed 5h ago',
-                isBuy: true,
-                pnl: '+ \$842.20',
-                entryPrice: '2321.10',
-                exitPrice: '2330.05',
-                icon: Icons.layers,
-                sparklineValues: [0.1, 0.15, 0.3, 0.25, 0.5, 0.65, 0.8],
-              ),
-              const SizedBox(height: 120),
+
+        const SliverToBoxAdapter(child: SizedBox(height: 20)),
+
+        // ── Stats Card ───────────────────────────────────────────────────────
+        SliverToBoxAdapter(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24),
+            child: _buildStatsCard(wins, losses),
+          ),
+        ),
+
+        const SliverToBoxAdapter(child: SizedBox(height: 28)),
+
+        // ── Trades List Header ───────────────────────────────────────────────
+        SliverToBoxAdapter(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24),
+            child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+              Text('Operaciones', style: SynapseTheme.headline(fontSize: 18)),
+              Text('${_history.length} registros',
+                  style: SynapseTheme.label(fontSize: 12, color: SynapseTheme.onSurfaceVariant)),
             ]),
           ),
         ),
+
+        const SliverToBoxAdapter(child: SizedBox(height: 12)),
+
+        // ── Content ──────────────────────────────────────────────────────────
+        if (_loading)
+          const SliverToBoxAdapter(
+            child: Padding(
+              padding: EdgeInsets.only(top: 80),
+              child: Center(child: CircularProgressIndicator()),
+            ),
+          )
+        else if (_history.isEmpty)
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.only(top: 60, left: 24, right: 24),
+              child: Center(
+                child: Column(mainAxisSize: MainAxisSize.min, children: [
+                  Icon(Icons.history_edu_outlined, size: 52, color: SynapseTheme.onSurfaceVariant.withOpacity(0.4)),
+                  const SizedBox(height: 16),
+                  Text('Sin historial aún', style: SynapseTheme.headline(fontSize: 18, color: SynapseTheme.onSurfaceVariant)),
+                  const SizedBox(height: 8),
+                  Text('Ejecuta tu primera orden para verla aquí.',
+                      style: SynapseTheme.label(color: SynapseTheme.onSurfaceVariant), textAlign: TextAlign.center),
+                ]),
+              ),
+            ),
+          )
+        else
+          SliverPadding(
+            padding: const EdgeInsets.symmetric(horizontal: 24),
+            sliver: SliverList(
+              delegate: SliverChildBuilderDelegate(
+                (context, i) {
+                  final h = _history[i];
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: _buildTradeCard(h),
+                  );
+                },
+                childCount: _history.length,
+              ),
+            ),
+          ),
+
+        const SliverToBoxAdapter(child: SizedBox(height: 100)),
       ],
     );
   }
 
-  Widget _buildStatsCard() {
-    return Container(
-      padding: const EdgeInsets.all(32),
-      decoration: BoxDecoration(
-        color: SynapseTheme.surfaceContainerLow,
-        borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: Colors.white.withOpacity(0.05)),
+  Widget _buildStatsCard(int wins, int losses) {
+    final isProfit = _totalProfit >= 0;
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(24),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+        child: Container(
+          padding: const EdgeInsets.all(24),
+          decoration: BoxDecoration(
+            color: SynapseTheme.surfaceContainerLow.withOpacity(0.7),
+            borderRadius: BorderRadius.circular(24),
+            border: Border.all(color: Colors.white.withOpacity(0.06)),
+          ),
+          child: Column(children: [
+            // Total Profit
+            Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+              Text('TOTAL P&L', style: SynapseTheme.label(fontSize: 11, letterSpacing: 1.5, color: SynapseTheme.onSurfaceVariant)),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: (_totalProfit >= 0 ? SynapseTheme.primaryContainer : SynapseTheme.secondary).withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  isProfit ? '▲ GANANCIA' : '▼ PÉRDIDA',
+                  style: SynapseTheme.headline(fontSize: 10, letterSpacing: 1,
+                      color: isProfit ? SynapseTheme.primaryContainer : SynapseTheme.secondary),
+                ),
+              ),
+            ]),
+            const SizedBox(height: 8),
+            Text(
+              '${isProfit ? '+' : ''}\$${_totalProfit.toStringAsFixed(2)}',
+              style: SynapseTheme.headline(
+                fontSize: 40,
+                letterSpacing: -1,
+                color: isProfit ? SynapseTheme.primaryContainer : SynapseTheme.secondary,
+              ),
+            ),
+            const SizedBox(height: 20),
+            // Stats row
+            Row(children: [
+              _statCell('WIN RATE', '${_winRate.toStringAsFixed(1)}%', SynapseTheme.primaryContainer),
+              _vDivider(),
+              _statCell('GANADORAS', '$wins', SynapseTheme.primaryContainer),
+              _vDivider(),
+              _statCell('PERDEDORAS', '$losses', SynapseTheme.secondary),
+              _vDivider(),
+              _statCell('TOTAL', '${_history.length}', Colors.white70),
+            ]),
+          ]),
+        ),
       ),
-      child: Stack(
-        children: [
-          // Decorative glow
-          Positioned(
-            right: -96,
-            top: -96,
-            child: Container(
-              width: 256,
-              height: 256,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: SynapseTheme.primaryContainer.withOpacity(0.1),
+    );
+  }
+
+  Widget _statCell(String label, String value, Color color) {
+    return Expanded(child: Column(children: [
+      Text(label, style: SynapseTheme.label(fontSize: 9, letterSpacing: 0.8, color: SynapseTheme.onSurfaceVariant)),
+      const SizedBox(height: 4),
+      Text(value, style: SynapseTheme.headline(fontSize: 16, color: color)),
+    ]));
+  }
+
+  Widget _vDivider() => Container(width: 1, height: 36, color: Colors.white.withOpacity(0.07));
+
+  Widget _buildTradeCard(Map<String, dynamic> trade) {
+    final profit = (trade['profit'] as num? ?? 0).toDouble();
+    final isProfit = profit >= 0;
+    final isBuy = (trade['type'] as String? ?? 'BUY').toUpperCase() == 'BUY';
+    final symbol = trade['symbol'] as String? ?? '—';
+    final volume = (trade['volume'] as num? ?? 0).toDouble();
+    final openPrice = (trade['openPrice'] as num? ?? 0).toDouble();
+    final closePrice = (trade['closePrice'] as num? ?? 0).toDouble();
+    final comment = trade['comment'] as String? ?? '';
+
+    return GlassCard(
+      borderRadius: 18,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Row(children: [
+          // Direction indicator
+          Container(
+            width: 44, height: 44,
+            decoration: BoxDecoration(
+              color: isBuy
+                  ? SynapseTheme.primaryContainer.withOpacity(0.12)
+                  : SynapseTheme.secondary.withOpacity(0.12),
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: Center(
+              child: Icon(
+                isBuy ? Icons.trending_up : Icons.trending_down,
+                color: isBuy ? SynapseTheme.primaryContainer : SynapseTheme.secondary,
+                size: 22,
               ),
             ),
           ),
-          Row(
-            children: [
-              // Win Rate
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('WIN RATE', style: SynapseTheme.label(fontSize: 11, letterSpacing: 3)),
-                    const SizedBox(height: 8),
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.baseline,
-                      textBaseline: TextBaseline.alphabetic,
-                      children: [
-                        Text('78%', style: SynapseTheme.headline(fontSize: 48, color: SynapseTheme.primaryContainer, letterSpacing: -2)),
-                        const SizedBox(width: 8),
-                        Icon(Icons.trending_up, color: SynapseTheme.primaryContainer, size: 24),
-                      ],
-                    ),
-                  ],
+          const SizedBox(width: 14),
+          // Info
+          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+              Text(symbol, style: SynapseTheme.headline(fontSize: 16)),
+              Text(
+                '${isProfit ? '+' : ''}\$${profit.toStringAsFixed(2)}',
+                style: SynapseTheme.headline(
+                  fontSize: 16,
+                  color: isProfit ? SynapseTheme.primaryContainer : SynapseTheme.secondary,
                 ),
               ),
-              const SizedBox(width: 24),
-              // Total + Streak
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text('TOTAL SIGNALS', style: SynapseTheme.label(fontSize: 11, letterSpacing: 3)),
-                  const SizedBox(height: 8),
-                  Text('1,248', style: SynapseTheme.headline(fontSize: 36)),
-                  const SizedBox(height: 16),
-                  Text('PROFIT STREAK', style: SynapseTheme.label(fontSize: 11, letterSpacing: 3)),
-                  const SizedBox(height: 8),
-                  Row(
-                    children: [
-                      Text('12', style: SynapseTheme.headline(fontSize: 36)),
-                      const SizedBox(width: 12),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                        decoration: BoxDecoration(
-                          color: SynapseTheme.primaryContainer.withOpacity(0.1),
-                          borderRadius: BorderRadius.circular(99),
-                          border: Border.all(color: SynapseTheme.primaryContainer.withOpacity(0.2)),
-                        ),
-                        child: Text(
-                          'NEW HIGH',
-                          style: SynapseTheme.headline(fontSize: 10, color: SynapseTheme.primaryContainer, letterSpacing: -0.5),
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
+            ]),
+            const SizedBox(height: 4),
+            Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+              Text(
+                '${isBuy ? 'COMPRA' : 'VENTA'} · $volume lot',
+                style: SynapseTheme.label(fontSize: 11, color: SynapseTheme.onSurfaceVariant),
               ),
+              Text(
+                '\$${openPrice.toStringAsFixed(openPrice < 10 ? 4 : 2)} → \$${closePrice.toStringAsFixed(closePrice < 10 ? 4 : 2)}',
+                style: SynapseTheme.label(fontSize: 11, color: SynapseTheme.onSurfaceVariant),
+              ),
+            ]),
+            if (comment.isNotEmpty) ...[
+              const SizedBox(height: 4),
+              Text(comment, style: SynapseTheme.label(fontSize: 10, color: SynapseTheme.onSurfaceVariant.withOpacity(0.7)),
+                  maxLines: 1, overflow: TextOverflow.ellipsis),
             ],
-          ),
-        ],
+          ])),
+        ]),
       ),
-    );
-  }
-
-  Widget _buildSignalCard({
-    required String symbol,
-    required String time,
-    required bool isBuy,
-    required String pnl,
-    required String entryPrice,
-    required String exitPrice,
-    required IconData icon,
-    required List<double> sparklineValues,
-  }) {
-    final accentColor = isBuy ? SynapseTheme.primaryContainer : SynapseTheme.secondaryContainer;
-    final textColor = isBuy ? SynapseTheme.primaryContainer : SynapseTheme.secondary;
-
-    return GlassCard(
-      glowColor: isBuy ? SynapseTheme.primaryContainer : null,
-      borderColor: isBuy ? Colors.white.withOpacity(0.1) : Colors.white.withOpacity(0.05),
-      child: Column(
-        children: [
-          // Header
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Row(
-                children: [
-                  Container(
-                    width: 48,
-                    height: 48,
-                    decoration: BoxDecoration(
-                      color: accentColor.withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(color: accentColor.withOpacity(0.2)),
-                    ),
-                    child: Icon(icon, color: textColor),
-                  ),
-                  const SizedBox(width: 16),
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(symbol, style: SynapseTheme.headline(fontSize: 18)),
-                      Text(time, style: SynapseTheme.label(fontSize: 12)),
-                    ],
-                  ),
-                ],
-              ),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: accentColor,
-                      borderRadius: BorderRadius.circular(99),
-                    ),
-                    child: Text(
-                      isBuy ? 'BUY' : 'SELL',
-                      style: SynapseTheme.headline(
-                        fontSize: 10,
-                        color: isBuy ? SynapseTheme.onPrimary : Colors.white,
-                        letterSpacing: 3,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(pnl, style: SynapseTheme.headline(fontSize: 20, color: textColor)),
-                ],
-              ),
-            ],
-          ),
-          const SizedBox(height: 20),
-          // Bottom: Entry, Sparkline, Exit
-          Row(
-            children: [
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text('ENTRY PRICE', style: SynapseTheme.label(fontSize: 10, letterSpacing: 3)),
-                  const SizedBox(height: 4),
-                  Text(entryPrice, style: SynapseTheme.headline(fontSize: 14)),
-                ],
-              ),
-              const SizedBox(width: 16),
-              // Sparkline
-              Expanded(
-                child: SizedBox(
-                  height: 48,
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: sparklineValues.asMap().entries.map((e) {
-                      final opacity = 0.1 + (e.value * 0.9);
-                      return Expanded(
-                        child: Container(
-                          margin: const EdgeInsets.symmetric(horizontal: 1),
-                          height: 48 * e.value,
-                          decoration: BoxDecoration(
-                            color: textColor.withOpacity(opacity),
-                            borderRadius: const BorderRadius.only(
-                              topLeft: Radius.circular(2),
-                              topRight: Radius.circular(2),
-                            ),
-                          ),
-                        ),
-                      );
-                    }).toList(),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 16),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  Text('EXIT PRICE', style: SynapseTheme.label(fontSize: 10, letterSpacing: 3)),
-                  const SizedBox(height: 4),
-                  Text(exitPrice, style: SynapseTheme.headline(fontSize: 14)),
-                ],
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _iconButton(IconData icon) {
-    return Container(
-      padding: const EdgeInsets.all(8),
-      decoration: BoxDecoration(
-        color: SynapseTheme.surfaceContainerHigh,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.white.withOpacity(0.05)),
-      ),
-      child: Icon(icon, size: 18, color: SynapseTheme.onSurfaceVariant),
     );
   }
 }

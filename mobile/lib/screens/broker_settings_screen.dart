@@ -1,32 +1,11 @@
 import 'dart:ui';
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import '../theme/synapse_theme.dart';
 import '../widgets/glass_card.dart';
+import '../providers/app_provider.dart';
 
-/// Broker configuration model
-class BrokerConfig {
-  final String id;
-  final String name;
-  final String logoText;
-  final Color logoColor;
-  String status; // 'connected', 'disconnected'
-  String apiKey;
-  String accountId;
-
-  BrokerConfig({
-    required this.id,
-    required this.name,
-    required this.logoText,
-    required this.logoColor,
-    this.status = 'disconnected',
-    this.apiKey = '',
-    this.accountId = '',
-  });
-}
-
-/// Configuración screen — pixel-perfect to the Stitch reference design.
-/// Sections: Broker Connections, Risk Management, Alerts, System Status.
-/// NO Telegram. Full multi-broker support with API key management.
+/// Configuración de Broker — conecta a MetaAPI para trading real.
 class BrokerSettingsScreen extends StatefulWidget {
   const BrokerSettingsScreen({super.key});
 
@@ -35,67 +14,75 @@ class BrokerSettingsScreen extends StatefulWidget {
 }
 
 class _BrokerSettingsScreenState extends State<BrokerSettingsScreen> {
-  // ── Broker list (expandable) ──────────────────────────────────────────────
-  final List<BrokerConfig> _brokers = [
-    BrokerConfig(
-      id: 'mt5',
-      name: 'MetaTrader 5',
-      logoText: 'MT5',
-      logoColor: const Color(0xFF0066FF),
-      status: 'connected',
-    ),
-    BrokerConfig(
-      id: 'exness',
-      name: 'Exness Global',
-      logoText: 'EX',
-      logoColor: const Color(0xFF00A651),
-    ),
-  ];
+  final _tokenCtrl = TextEditingController();
+  final _accountCtrl = TextEditingController();
+  bool _isConnecting = false;
+  String? _connectionMessage;
+  bool _tokenVisible = false;
 
-  // ── Risk settings ─────────────────────────────────────────────────────────
+  // Risk & auto-trading UI state managed here, saved to provider
   double _riskPercent = 1.5;
-  double _stopLossPips = 25;
-  double _targetPips = 75;
   bool _disciplineMode = true;
-
-  // ── Alerts ────────────────────────────────────────────────────────────────
   bool _pushNotifications = false;
   bool _priceAlerts = true;
-  bool _weeklyReport = true;
+  double _minConfidence = 82.0;
 
-  // ── Sync ──────────────────────────────────────────────────────────────────
-  bool _syncGlobal = true;
-  final String _syncLatency = '12ms';
+  @override
+  void initState() {
+    super.initState();
+    final provider = context.read<AppProvider>();
+    _tokenCtrl.text = provider.metaApiToken;
+    _accountCtrl.text = provider.metaApiAccountId;
+    _riskPercent = provider.riskPercent;
+    _minConfidence = provider.minConfidenceForAuto;
+  }
+
+  @override
+  void dispose() {
+    _tokenCtrl.dispose();
+    _accountCtrl.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: SynapseTheme.surface,
-      body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(20, 24, 20, 120),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _buildHeader(),
-              const SizedBox(height: 32),
-              _buildBrokerSection(),
-              const SizedBox(height: 24),
-              _buildSyncBar(),
-              const SizedBox(height: 24),
-              _buildRiskSection(),
-              const SizedBox(height: 24),
-              _buildAlertsSection(),
-              const SizedBox(height: 20),
-              _buildSystemStatus(),
-            ],
+    return Consumer<AppProvider>(
+      builder: (context, provider, _) {
+        return Scaffold(
+          backgroundColor: SynapseTheme.surface,
+          body: SafeArea(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(20, 24, 20, 120),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _buildHeader(),
+                  const SizedBox(height: 32),
+                  _buildConnectionCard(provider),
+                  const SizedBox(height: 24),
+                  if (provider.brokerConnected) ...[
+                    _buildAccountInfoCard(provider),
+                    const SizedBox(height: 24),
+                    _buildOpenPositionsCard(provider),
+                    const SizedBox(height: 24),
+                  ],
+                  _buildRiskSection(provider),
+                  const SizedBox(height: 24),
+                  _buildAutoTradingSection(provider),
+                  const SizedBox(height: 24),
+                  _buildAlertsSection(),
+                  const SizedBox(height: 20),
+                  _buildSystemStatus(provider),
+                ],
+              ),
+            ),
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 
-  // ── Header ─────────────────────────────────────────────────────────────────
+  // ── Header ──────────────────────────────────────────────────────────────────
   Widget _buildHeader() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -115,178 +102,338 @@ class _BrokerSettingsScreenState extends State<BrokerSettingsScreen> {
         const SizedBox(height: 12),
         Text('Configuración', style: SynapseTheme.headline(fontSize: 32, letterSpacing: -1)),
         const SizedBox(height: 8),
-        Text(
-          'Optimiza tu entorno de trading neuronal y gestión de riesgos.',
-          style: SynapseTheme.label(fontSize: 14, color: SynapseTheme.onSurfaceVariant),
-        ),
+        Text('Conecta tu broker MT5/Exness para trading real con IA.',
+            style: SynapseTheme.label(fontSize: 14, color: SynapseTheme.onSurfaceVariant)),
       ],
     );
   }
 
-  // ── Broker Connections ────────────────────────────────────────────────────
-  Widget _buildBrokerSection() {
+  // ── Broker Connection Card ────────────────────────────────────────────────
+  Widget _buildConnectionCard(AppProvider provider) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-          Row(children: [
-            const Icon(Icons.electric_bolt, size: 18, color: Color(0xFFF5A623)),
-            const SizedBox(width: 8),
-            Text('Conexiones de Broker', style: SynapseTheme.headline(fontSize: 15)),
-          ]),
-          GestureDetector(
-            onTap: () => _showAddBrokerDialog(),
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-              decoration: BoxDecoration(
-                color: SynapseTheme.surfaceContainerHigh,
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: SynapseTheme.primaryContainer.withOpacity(0.3)),
-              ),
-              child: Text('VINCULAR NUEVO', style: SynapseTheme.headline(fontSize: 10, color: SynapseTheme.primaryContainer, letterSpacing: 1)),
-            ),
-          ),
+        Row(children: [
+          const Icon(Icons.electric_bolt, size: 18, color: Color(0xFFF5A623)),
+          const SizedBox(width: 8),
+          Text('Conexión MetaAPI / Broker', style: SynapseTheme.headline(fontSize: 15)),
         ]),
-        const SizedBox(height: 16),
+        const SizedBox(height: 12),
         GlassCard(
           borderRadius: 20,
-          child: Column(
-            children: [
-              ..._brokers.map((b) => _buildBrokerCard(b)),
-              // ADD API button
-              GestureDetector(
-                onTap: _showAddBrokerDialog,
-                child: Container(
-                  margin: const EdgeInsets.only(top: 4),
-                  padding: const EdgeInsets.symmetric(vertical: 18),
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Status indicator
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                   decoration: BoxDecoration(
-                    border: Border(top: BorderSide(color: Colors.white.withOpacity(0.06))),
+                    color: provider.brokerConnected
+                        ? SynapseTheme.primaryContainer.withOpacity(0.1)
+                        : SynapseTheme.surfaceContainerHigh,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: provider.brokerConnected
+                          ? SynapseTheme.primaryContainer.withOpacity(0.4)
+                          : Colors.white.withOpacity(0.08),
+                    ),
                   ),
-                  child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-                    Icon(Icons.add_circle_outline, color: SynapseTheme.onSurfaceVariant, size: 20),
+                  child: Row(children: [
+                    Container(
+                      width: 8, height: 8,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: provider.brokerConnected
+                            ? SynapseTheme.primaryContainer
+                            : SynapseTheme.onSurfaceVariant,
+                        boxShadow: provider.brokerConnected
+                            ? [BoxShadow(color: SynapseTheme.primaryContainer.withOpacity(0.6), blurRadius: 6)]
+                            : null,
+                      ),
+                    ),
                     const SizedBox(width: 10),
-                    Text('AÑADIR API', style: SynapseTheme.headline(fontSize: 13, color: SynapseTheme.onSurfaceVariant, letterSpacing: 1)),
+                    Text(
+                      provider.brokerConnected
+                          ? '${provider.brokerName} — CONECTADO (${provider.accountInfo['mode'] == 'live' ? 'REAL' : 'DEMO'})'
+                          : 'Sin conexión — modo Demo',
+                      style: SynapseTheme.label(
+                        fontSize: 12,
+                        color: provider.brokerConnected ? SynapseTheme.primaryContainer : SynapseTheme.onSurfaceVariant,
+                        letterSpacing: 0.3,
+                      ),
+                    ),
                   ]),
                 ),
-              ),
-            ],
+                const SizedBox(height: 16),
+                // How to get credentials
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF5A623).withOpacity(0.08),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: const Color(0xFFF5A623).withOpacity(0.2)),
+                  ),
+                  child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    const Icon(Icons.info_outline, size: 16, color: Color(0xFFF5A623)),
+                    const SizedBox(width: 8),
+                    Expanded(child: Text(
+                      'Obtén tu MetaAPI Token gratis en metaapi.cloud — conecta tu cuenta MT5/Exness en menos de 5 min.',
+                      style: SynapseTheme.label(fontSize: 11, color: const Color(0xFFF5A623)),
+                    )),
+                  ]),
+                ),
+                const SizedBox(height: 16),
+                // Broker type chips
+                Text('PLATAFORMA', style: SynapseTheme.label(fontSize: 10, letterSpacing: 1.5, color: SynapseTheme.onSurfaceVariant)),
+                const SizedBox(height: 8),
+                Wrap(spacing: 8, runSpacing: 6,
+                  children: ['MT5 / Exness', 'MT5 / IC Markets', 'MT5 / Pepperstone', 'MT4', 'Deriv'].map((b) {
+                    final selected = provider.brokerName == b;
+                    return GestureDetector(
+                      onTap: () => setState(() {}),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: selected ? SynapseTheme.primaryContainer.withOpacity(0.15) : SynapseTheme.surfaceContainerHigh,
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(
+                            color: selected ? SynapseTheme.primaryContainer.withOpacity(0.5) : Colors.white.withOpacity(0.07),
+                          ),
+                        ),
+                        child: Text(b, style: SynapseTheme.label(
+                          fontSize: 11,
+                          color: selected ? SynapseTheme.primaryContainer : SynapseTheme.onSurfaceVariant,
+                        )),
+                      ),
+                    );
+                  }).toList(),
+                ),
+                const SizedBox(height: 16),
+                // Token field
+                _inputField(_tokenCtrl, 'MetaAPI Token', Icons.key, obscure: !_tokenVisible,
+                  suffix: GestureDetector(
+                    onTap: () => setState(() => _tokenVisible = !_tokenVisible),
+                    child: Icon(_tokenVisible ? Icons.visibility_off : Icons.visibility,
+                        size: 18, color: SynapseTheme.onSurfaceVariant),
+                  )),
+                const SizedBox(height: 10),
+                _inputField(_accountCtrl, 'Account ID', Icons.account_balance),
+                // Error/success message
+                if (_connectionMessage != null) ...[
+                  const SizedBox(height: 10),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: _connectionMessage!.contains('✅')
+                          ? SynapseTheme.primaryContainer.withOpacity(0.1)
+                          : SynapseTheme.secondary.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Text(_connectionMessage!, style: SynapseTheme.label(fontSize: 12,
+                      color: _connectionMessage!.contains('✅') ? SynapseTheme.primaryContainer : SynapseTheme.secondary)),
+                  ),
+                ],
+                const SizedBox(height: 16),
+                // Buttons row
+                Row(children: [
+                  if (provider.brokerConnected) ...[
+                    Expanded(
+                      child: OutlinedButton(
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: SynapseTheme.secondary,
+                          side: BorderSide(color: SynapseTheme.secondary.withOpacity(0.5)),
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                        ),
+                        onPressed: () {
+                          provider.disconnectBroker();
+                          _tokenCtrl.clear();
+                          _accountCtrl.clear();
+                          setState(() => _connectionMessage = null);
+                        },
+                        child: Text('DESCONECTAR', style: SynapseTheme.headline(fontSize: 12, color: SynapseTheme.secondary)),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                  ],
+                  Expanded(
+                    flex: 2,
+                    child: ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: SynapseTheme.primaryContainer,
+                        foregroundColor: SynapseTheme.onPrimary,
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                      ),
+                      onPressed: _isConnecting ? null : () => _connect(provider),
+                      child: _isConnecting
+                          ? const SizedBox(width: 18, height: 18,
+                              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                          : Text('VINCULAR BROKER', style: SynapseTheme.headline(fontSize: 13, color: SynapseTheme.onPrimary)),
+                    ),
+                  ),
+                ]),
+              ],
+            ),
           ),
         ),
       ],
     );
   }
 
-  Widget _buildBrokerCard(BrokerConfig broker) {
-    final isConnected = broker.status == 'connected';
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        border: Border(bottom: BorderSide(color: Colors.white.withOpacity(0.06))),
-      ),
-      child: Row(
-        children: [
-          // Logo
+  Future<void> _connect(AppProvider provider) async {
+    if (_tokenCtrl.text.isEmpty || _accountCtrl.text.isEmpty) {
+      setState(() => _connectionMessage = '⚠️ Ingresa Token y Account ID');
+      return;
+    }
+    setState(() { _isConnecting = true; _connectionMessage = null; });
+
+    final connected = await provider.configureBroker(
+      token: _tokenCtrl.text.trim(),
+      accountId: _accountCtrl.text.trim(),
+      brokerName: 'MetaAPI',
+    );
+
+    setState(() {
+      _isConnecting = false;
+      if (connected) {
+        _connectionMessage = '✅ Conectado — ${provider.accountInfo['mode'] == 'live' ? 'Cuenta Real' : 'Cuenta Demo'}';
+      } else {
+        _connectionMessage = '⚠️ Modo demo activo. Verifica credenciales en metaapi.cloud';
+      }
+    });
+  }
+
+  // ── Account Info Card ─────────────────────────────────────────────────────
+  Widget _buildAccountInfoCard(AppProvider provider) {
+    final info = provider.accountInfo;
+    final balance = (info['balance'] ?? 0.0) as num;
+    final equity = (info['equity'] ?? 0.0) as num;
+    final profit = (info['profit'] ?? info['free_margin'] ?? 0.0) as num;
+    final isReal = info['mode'] == 'live';
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(children: [
+          const Icon(Icons.account_balance_wallet_outlined, size: 18, color: Color(0xFF00E5B4)),
+          const SizedBox(width: 8),
+          Text('Cuenta del Broker', style: SynapseTheme.headline(fontSize: 15)),
+          const Spacer(),
           Container(
-            width: 52, height: 52,
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
             decoration: BoxDecoration(
-              color: broker.logoColor.withOpacity(0.12),
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: broker.logoColor.withOpacity(0.25)),
+              color: isReal ? const Color(0xFFFF4C6E).withOpacity(0.15) : SynapseTheme.primaryContainer.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(8),
             ),
-            child: Center(
-              child: Text(broker.logoText, style: SynapseTheme.headline(fontSize: 15, color: broker.logoColor)),
+            child: Text(
+              isReal ? 'REAL' : 'DEMO',
+              style: SynapseTheme.headline(fontSize: 10, letterSpacing: 1.5,
+                  color: isReal ? const Color(0xFFFF4C6E) : SynapseTheme.primaryContainer),
             ),
           ),
-          const SizedBox(width: 16),
-          // Name + status
-          Expanded(
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(broker.name, style: SynapseTheme.headline(fontSize: 15)),
-              const SizedBox(height: 4),
-              Row(children: [
-                Container(
-                  width: 6, height: 6,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: isConnected ? SynapseTheme.primaryContainer : SynapseTheme.onSurfaceVariant,
-                  ),
-                ),
-                const SizedBox(width: 6),
-                Text(
-                  isConnected ? 'CONECTADO' : 'NO VINCULADO',
-                  style: SynapseTheme.label(
-                    fontSize: 11,
-                    color: isConnected ? SynapseTheme.primaryContainer : SynapseTheme.onSurfaceVariant,
-                    letterSpacing: 0.5,
-                  ),
-                ),
-              ]),
+        ]),
+        const SizedBox(height: 12),
+        GlassCard(
+          borderRadius: 20,
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: Row(children: [
+              _accountStat('BALANCE', '\$${balance.toStringAsFixed(2)}'),
+              _divider(),
+              _accountStat('EQUITY', '\$${equity.toStringAsFixed(2)}'),
+              _divider(),
+              _accountStat('P&L', '\$${profit.toStringAsFixed(2)}',
+                  color: profit >= 0 ? SynapseTheme.primaryContainer : SynapseTheme.secondary),
             ]),
           ),
-          // Actions
-          Row(children: [
-            if (isConnected)
-              GestureDetector(
-                onTap: () => _showBrokerDetail(broker),
-                child: Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: SynapseTheme.surfaceContainerHigh,
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: const Icon(Icons.settings, size: 16, color: Colors.white70),
-                ),
-              )
-            else
-              GestureDetector(
-                onTap: () => _showBrokerDetail(broker),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                  decoration: BoxDecoration(
-                    color: SynapseTheme.primaryContainer.withOpacity(0.12),
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: SynapseTheme.primaryContainer.withOpacity(0.3)),
-                  ),
-                  child: Text('VINCULAR', style: SynapseTheme.headline(fontSize: 10, color: SynapseTheme.primaryContainer, letterSpacing: 0.5)),
-                ),
-              ),
-          ]),
-        ],
-      ),
+        ),
+      ],
     );
   }
 
-  // ── Sync Global Bar ───────────────────────────────────────────────────────
-  Widget _buildSyncBar() {
-    return GlassCard(
-      borderRadius: 16,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-              Text('SYNC GLOBAL', style: SynapseTheme.headline(fontSize: 11, color: SynapseTheme.onSurfaceVariant, letterSpacing: 1.5)),
-              Row(children: [
-                Text(_syncLatency,
-                    style: SynapseTheme.headline(fontSize: 12, color: SynapseTheme.primaryContainer)),
-                const SizedBox(width: 12),
-                _buildSmallToggle(_syncGlobal, (v) => setState(() => _syncGlobal = v)),
-              ]),
-            ]),
-            const SizedBox(height: 8),
-            Text(
-              'Latencia optimizada mediante red neuronal propia en todos los instrumentos.',
-              style: SynapseTheme.label(fontSize: 12, color: SynapseTheme.onSurfaceVariant),
-            ),
-          ],
+  Widget _accountStat(String label, String value, {Color? color}) {
+    return Expanded(child: Column(children: [
+      Text(label, style: SynapseTheme.label(fontSize: 10, letterSpacing: 1, color: SynapseTheme.onSurfaceVariant)),
+      const SizedBox(height: 4),
+      Text(value, style: SynapseTheme.headline(fontSize: 15, color: color ?? SynapseTheme.onSurface)),
+    ]));
+  }
+
+  Widget _divider() => Container(width: 1, height: 36, color: Colors.white.withOpacity(0.08));
+
+  // ── Open Positions ────────────────────────────────────────────────────────
+  Widget _buildOpenPositionsCard(AppProvider provider) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(children: [
+          const Icon(Icons.show_chart, size: 18, color: Color(0xFF00E5B4)),
+          const SizedBox(width: 8),
+          Text('Posiciones Abiertas', style: SynapseTheme.headline(fontSize: 15)),
+          const Spacer(),
+          if (provider.openPositions.isNotEmpty)
+            Text('${provider.openPositions.length} activa${provider.openPositions.length > 1 ? 's' : ''}',
+                style: SynapseTheme.label(fontSize: 12, color: SynapseTheme.primaryContainer)),
+        ]),
+        const SizedBox(height: 12),
+        GlassCard(
+          borderRadius: 20,
+          child: provider.openPositions.isEmpty
+              ? Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: Center(child: Text('Sin posiciones abiertas',
+                      style: SynapseTheme.label(color: SynapseTheme.onSurfaceVariant))),
+                )
+              : Column(
+                  children: provider.openPositions.map((pos) => _buildPositionRow(pos, provider)).toList(),
+                ),
         ),
+      ],
+    );
+  }
+
+  Widget _buildPositionRow(OpenPosition pos, AppProvider provider) {
+    final isProfit = pos.profit >= 0;
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        border: Border(bottom: BorderSide(color: Colors.white.withOpacity(0.05))),
       ),
+      child: Row(children: [
+        Container(
+          width: 40, height: 40,
+          decoration: BoxDecoration(
+            color: pos.isBuy ? SynapseTheme.primaryContainer.withOpacity(0.1) : SynapseTheme.secondary.withOpacity(0.1),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Center(child: Text(
+            pos.isBuy ? '↑' : '↓',
+            style: TextStyle(fontSize: 18, color: pos.isBuy ? SynapseTheme.primaryContainer : SynapseTheme.secondary),
+          )),
+        ),
+        const SizedBox(width: 12),
+        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(pos.symbol, style: SynapseTheme.headline(fontSize: 14)),
+          Text('${pos.volume} lot · ${pos.direction}',
+              style: SynapseTheme.label(fontSize: 11, color: SynapseTheme.onSurfaceVariant)),
+        ])),
+        Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+          Text(
+            '${isProfit ? '+' : ''}\$${pos.profit.toStringAsFixed(2)}',
+            style: SynapseTheme.headline(fontSize: 15,
+                color: isProfit ? SynapseTheme.primaryContainer : SynapseTheme.secondary),
+          ),
+          Text('@ ${pos.openPrice}', style: SynapseTheme.label(fontSize: 10, color: SynapseTheme.onSurfaceVariant)),
+        ]),
+      ]),
     );
   }
 
   // ── Risk Management ───────────────────────────────────────────────────────
-  Widget _buildRiskSection() {
+  Widget _buildRiskSection(AppProvider provider) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -295,27 +442,22 @@ class _BrokerSettingsScreenState extends State<BrokerSettingsScreen> {
           const SizedBox(width: 8),
           Text('Gestión de Riesgo', style: SynapseTheme.headline(fontSize: 15)),
         ]),
-        const SizedBox(height: 16),
+        const SizedBox(height: 12),
         GlassCard(
           borderRadius: 20,
           child: Padding(
             padding: const EdgeInsets.all(20),
             child: Column(children: [
-              // Risk % slider
               Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-                Text('RIESGO MÁXIMO POR OPERACIÓN', style: SynapseTheme.label(fontSize: 11, letterSpacing: 0.5)),
+                Text('RIESGO POR OPERACIÓN', style: SynapseTheme.label(fontSize: 11, letterSpacing: 0.5)),
                 Text('${_riskPercent.toStringAsFixed(1)}%',
-                    style: SynapseTheme.headline(fontSize: 16, color: SynapseTheme.primaryContainer)),
+                    style: SynapseTheme.headline(fontSize: 18, color: SynapseTheme.primaryContainer)),
               ]),
-              _buildSlider(_riskPercent, 0.5, 5, 9, (v) => setState(() => _riskPercent = v)),
+              _buildSlider(_riskPercent, 0.5, 5, 9, (v) {
+                setState(() => _riskPercent = v);
+                provider.setRiskPercent(v);
+              }),
               const SizedBox(height: 16),
-              // SL Pips
-              _buildPipRow('STOP / PIPS AUTOMÁTICO', '${_stopLossPips.toInt()} Pips', () => _editPips(false)),
-              const SizedBox(height: 12),
-              // Target Pips
-              _buildPipRow('TAKE PROFIT OBJETIVO', '${_targetPips.toInt()} Pips', () => _editPips(true)),
-              const SizedBox(height: 16),
-              // Discipline Mode
               Container(
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
@@ -332,14 +474,12 @@ class _BrokerSettingsScreenState extends State<BrokerSettingsScreen> {
                     child: const Icon(Icons.block, size: 18, color: Color(0xFFF5A623)),
                   ),
                   const SizedBox(width: 14),
-                  Expanded(
-                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      Text('Modo Disciplina', style: SynapseTheme.headline(fontSize: 14)),
-                      Text('El sistema frena el trading tras 3 pérdidas consecutivas.',
-                          style: SynapseTheme.label(fontSize: 11, color: SynapseTheme.onSurfaceVariant)),
-                    ]),
-                  ),
-                  _buildSmallToggle(_disciplineMode, (v) => setState(() => _disciplineMode = v),
+                  Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Text('Modo Disciplina', style: SynapseTheme.headline(fontSize: 14)),
+                    Text('Pausa auto-trading tras 3 pérdidas consecutivas.',
+                        style: SynapseTheme.label(fontSize: 11, color: SynapseTheme.onSurfaceVariant)),
+                  ])),
+                  _buildToggle(_disciplineMode, (v) => setState(() => _disciplineMode = v),
                       activeColor: const Color(0xFFF5A623)),
                 ]),
               ),
@@ -350,38 +490,81 @@ class _BrokerSettingsScreenState extends State<BrokerSettingsScreen> {
     );
   }
 
-  Widget _buildPipRow(String label, String value, VoidCallback onEdit) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
-      decoration: BoxDecoration(
-        color: SynapseTheme.surfaceContainerHigh.withOpacity(0.4),
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-        Text(label, style: SynapseTheme.label(fontSize: 11, color: SynapseTheme.onSurfaceVariant, letterSpacing: 0.3)),
+  // ── Auto-Trading Section ──────────────────────────────────────────────────
+  Widget _buildAutoTradingSection(AppProvider provider) {
+    final autoOn = provider.autoTradingEnabled;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
         Row(children: [
-          Text(value, style: SynapseTheme.headline(fontSize: 14)),
-          const SizedBox(width: 10),
-          GestureDetector(
-            onTap: onEdit,
-            child: Icon(Icons.edit_outlined, size: 16, color: SynapseTheme.onSurfaceVariant),
-          ),
+          Icon(Icons.smart_toy_outlined, size: 18, color: autoOn ? SynapseTheme.primaryContainer : SynapseTheme.onSurfaceVariant),
+          const SizedBox(width: 8),
+          Text('Trading Automático IA', style: SynapseTheme.headline(fontSize: 15)),
         ]),
-      ]),
-    );
-  }
-
-  Widget _buildSlider(double value, double min, double max, int div, ValueChanged<double> onChanged) {
-    return SliderTheme(
-      data: SliderThemeData(
-        activeTrackColor: SynapseTheme.primaryContainer,
-        inactiveTrackColor: SynapseTheme.surfaceContainerHighest,
-        thumbColor: Colors.white,
-        trackHeight: 4,
-        thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 7),
-        overlayColor: SynapseTheme.primaryContainer.withOpacity(0.15),
-      ),
-      child: Slider(value: value, min: min, max: max, divisions: div, onChanged: onChanged),
+        const SizedBox(height: 12),
+        GlassCard(
+          borderRadius: 20,
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              // Main toggle
+              Row(children: [
+                Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text('EJECUCIÓN AUTOMÁTICA', style: SynapseTheme.headline(fontSize: 13)),
+                  const SizedBox(height: 4),
+                  Text(
+                    autoOn ? '${provider.autoTradingStatus.toUpperCase()} · ${provider.autoTradesExecuted} trades ejecutados'
+                           : 'La IA ejecuta órdenes con SL y TP automáticamente.',
+                    style: SynapseTheme.label(fontSize: 11,
+                        color: autoOn ? SynapseTheme.primaryContainer : SynapseTheme.onSurfaceVariant),
+                  ),
+                ])),
+                _buildToggle(autoOn, (v) => provider.toggleAutoTrading(v),
+                    activeColor: SynapseTheme.primaryContainer),
+              ]),
+              if (autoOn) ...[
+                const SizedBox(height: 16),
+                Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: SynapseTheme.primaryContainer.withOpacity(0.08),
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: SynapseTheme.primaryContainer.withOpacity(0.2)),
+                  ),
+                  child: Column(children: [
+                    Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                      Text('Confianza mínima', style: SynapseTheme.label(fontSize: 12)),
+                      Text('${_minConfidence.toInt()}%',
+                          style: SynapseTheme.headline(fontSize: 14, color: SynapseTheme.primaryContainer)),
+                    ]),
+                    _buildSlider(_minConfidence, 70, 96, 13, (v) {
+                      setState(() => _minConfidence = v);
+                      provider.setMinConfidence(v);
+                    }),
+                  ]),
+                ),
+              ],
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFF4C6E).withOpacity(0.06),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: const Color(0xFFFF4C6E).withOpacity(0.15)),
+                ),
+                child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  const Icon(Icons.warning_amber_rounded, size: 15, color: Color(0xFFFF4C6E)),
+                  const SizedBox(width: 8),
+                  Expanded(child: Text(
+                    'El trading automático ejecuta órdenes reales en tu broker. Configura bien tu gestión de riesgo antes de activarlo.',
+                    style: SynapseTheme.label(fontSize: 11, color: const Color(0xFFFF4C6E)),
+                  )),
+                ]),
+              ),
+            ]),
+          ),
+        ),
+      ],
     );
   }
 
@@ -395,20 +578,15 @@ class _BrokerSettingsScreenState extends State<BrokerSettingsScreen> {
           const SizedBox(width: 8),
           Text('Alertas', style: SynapseTheme.headline(fontSize: 15)),
         ]),
-        const SizedBox(height: 16),
+        const SizedBox(height: 12),
         GlassCard(
           borderRadius: 20,
           child: Padding(
             padding: const EdgeInsets.symmetric(vertical: 4),
             child: Column(children: [
-              _buildAlertRow('Notificaciones Push', _pushNotifications,
-                  (v) => setState(() => _pushNotifications = v)),
-              _buildAlertDivider(),
-              _buildAlertRow('Alertas de Precio', _priceAlerts,
-                  (v) => setState(() => _priceAlerts = v), activeColor: SynapseTheme.primaryContainer),
-              _buildAlertDivider(),
-              _buildAlertRow('Reporte Semanal', _weeklyReport,
-                  (v) => setState(() => _weeklyReport = v), activeColor: SynapseTheme.primaryContainer),
+              _alertRow('Notificaciones Push', _pushNotifications, (v) => setState(() => _pushNotifications = v)),
+              _alertDivider(),
+              _alertRow('Alertas de Precio', _priceAlerts, (v) => setState(() => _priceAlerts = v)),
             ]),
           ),
         ),
@@ -416,44 +594,48 @@ class _BrokerSettingsScreenState extends State<BrokerSettingsScreen> {
     );
   }
 
-  Widget _buildAlertRow(String label, bool value, ValueChanged<bool> onChanged, {Color? activeColor}) {
+  Widget _alertRow(String label, bool value, ValueChanged<bool> onChanged) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
       child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
         Text(label, style: SynapseTheme.label(fontSize: 14, color: SynapseTheme.onSurface)),
-        _buildSmallToggle(value, onChanged, activeColor: activeColor),
+        _buildToggle(value, onChanged),
       ]),
     );
   }
 
-  Widget _buildAlertDivider() => Container(
-    height: 1,
-    margin: const EdgeInsets.symmetric(horizontal: 20),
+  Widget _alertDivider() => Container(
+    height: 1, margin: const EdgeInsets.symmetric(horizontal: 20),
     color: Colors.white.withOpacity(0.05),
   );
 
   // ── System Status ─────────────────────────────────────────────────────────
-  Widget _buildSystemStatus() {
+  Widget _buildSystemStatus(AppProvider provider) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 4),
       child: Row(children: [
         Container(
           width: 8, height: 8,
           decoration: BoxDecoration(
-            color: SynapseTheme.primaryContainer,
+            color: provider.isConnected ? SynapseTheme.primaryContainer : SynapseTheme.onSurfaceVariant,
             shape: BoxShape.circle,
-            boxShadow: [BoxShadow(color: SynapseTheme.primaryContainer.withOpacity(0.6), blurRadius: 6)],
+            boxShadow: provider.isConnected
+                ? [BoxShadow(color: SynapseTheme.primaryContainer.withOpacity(0.6), blurRadius: 6)]
+                : null,
           ),
         ),
         const SizedBox(width: 10),
-        Text('Estado del Sistema · Sincronizado',
-            style: SynapseTheme.label(fontSize: 12, color: SynapseTheme.onSurfaceVariant)),
+        Text(
+          'Sistema ${provider.isConnected ? 'Conectado' : 'Offline'} · '
+          '${provider.brokerConnected ? 'Broker Activo' : 'Sin Broker'}',
+          style: SynapseTheme.label(fontSize: 12, color: SynapseTheme.onSurfaceVariant),
+        ),
       ]),
     );
   }
 
-  // ── Reusable toggle  ──────────────────────────────────────────────────────
-  Widget _buildSmallToggle(bool value, ValueChanged<bool> onChanged, {Color? activeColor}) {
+  // ── Helpers ───────────────────────────────────────────────────────────────
+  Widget _buildToggle(bool value, ValueChanged<bool> onChanged, {Color? activeColor}) {
     return GestureDetector(
       onTap: () => onChanged(!value),
       child: AnimatedContainer(
@@ -476,231 +658,22 @@ class _BrokerSettingsScreenState extends State<BrokerSettingsScreen> {
     );
   }
 
-  // ── Dialogs ───────────────────────────────────────────────────────────────
-  void _showAddBrokerDialog() {
-    final nameCtrl = TextEditingController();
-    final apiCtrl = TextEditingController();
-    final accountCtrl = TextEditingController();
-    String selectedType = 'MT5';
-
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setModal) => ClipRRect(
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(32)),
-          child: BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: 24, sigmaY: 24),
-            child: Container(
-              padding: EdgeInsets.only(
-                left: 24, right: 24, top: 24,
-                bottom: MediaQuery.of(ctx).viewInsets.bottom + 24,
-              ),
-              decoration: BoxDecoration(
-                color: SynapseTheme.surfaceContainerHigh.withOpacity(0.95),
-                borderRadius: const BorderRadius.vertical(top: Radius.circular(32)),
-                border: Border.all(color: Colors.white.withOpacity(0.1)),
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Center(
-                    child: Container(width: 40, height: 4,
-                        decoration: BoxDecoration(color: SynapseTheme.onSurfaceVariant, borderRadius: BorderRadius.circular(9))),
-                  ),
-                  const SizedBox(height: 20),
-                  Text('Añadir Nuevo Broker', style: SynapseTheme.headline(fontSize: 20)),
-                  const SizedBox(height: 20),
-                  // Broker type selector
-                  Text('TIPO DE BROKER', style: SynapseTheme.label(fontSize: 11, letterSpacing: 1)),
-                  const SizedBox(height: 10),
-                  Wrap(spacing: 8, children: ['MT5', 'MT4', 'cTrader', 'API Propia', 'OANDA', 'Exness', 'Deriv', 'IC Markets']
-                      .map((t) => ChoiceChip(
-                            label: Text(t, style: SynapseTheme.label(fontSize: 12, color: selectedType == t ? SynapseTheme.onPrimary : SynapseTheme.onSurfaceVariant)),
-                            selected: selectedType == t,
-                            selectedColor: SynapseTheme.primaryContainer,
-                            backgroundColor: SynapseTheme.surfaceContainerLow,
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                            onSelected: (_) => setModal(() => selectedType = t),
-                          ))
-                      .toList()),
-                  const SizedBox(height: 16),
-                  _inputField(nameCtrl, 'Nombre de la cuenta', Icons.label_outline),
-                  const SizedBox(height: 12),
-                  _inputField(apiCtrl, 'MetaApi Token / API Key', Icons.key, obscure: true),
-                  const SizedBox(height: 12),
-                  _inputField(accountCtrl, 'Account ID / Login', Icons.account_balance),
-                  const SizedBox(height: 24),
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: SynapseTheme.primaryContainer,
-                        foregroundColor: SynapseTheme.onPrimary,
-                        padding: const EdgeInsets.symmetric(vertical: 16),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                      ),
-                      onPressed: () {
-                        if (nameCtrl.text.isNotEmpty) {
-                          setState(() {
-                            _brokers.add(BrokerConfig(
-                              id: DateTime.now().millisecondsSinceEpoch.toString(),
-                              name: nameCtrl.text,
-                              logoText: selectedType.substring(0, 2).toUpperCase(),
-                              logoColor: SynapseTheme.primaryContainer,
-                              apiKey: apiCtrl.text,
-                              accountId: accountCtrl.text,
-                            ));
-                          });
-                          Navigator.pop(ctx);
-                        }
-                      },
-                      child: Text('VINCULAR BROKER', style: SynapseTheme.headline(fontSize: 15, color: SynapseTheme.onPrimary)),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
+  Widget _buildSlider(double value, double min, double max, int div, ValueChanged<double> onChanged) {
+    return SliderTheme(
+      data: SliderThemeData(
+        activeTrackColor: SynapseTheme.primaryContainer,
+        inactiveTrackColor: SynapseTheme.surfaceContainerHighest,
+        thumbColor: Colors.white,
+        trackHeight: 4,
+        thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 7),
+        overlayColor: SynapseTheme.primaryContainer.withOpacity(0.15),
       ),
+      child: Slider(value: value, min: min, max: max, divisions: div, onChanged: onChanged),
     );
   }
 
-  void _showBrokerDetail(BrokerConfig broker) {
-    final apiCtrl = TextEditingController(text: broker.apiKey);
-    final accountCtrl = TextEditingController(text: broker.accountId);
-
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) => ClipRRect(
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(32)),
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 24, sigmaY: 24),
-          child: Container(
-            padding: EdgeInsets.only(
-              left: 24, right: 24, top: 24,
-              bottom: MediaQuery.of(ctx).viewInsets.bottom + 24,
-            ),
-            decoration: BoxDecoration(
-              color: SynapseTheme.surfaceContainerHigh.withOpacity(0.95),
-              borderRadius: const BorderRadius.vertical(top: Radius.circular(32)),
-              border: Border.all(color: Colors.white.withOpacity(0.1)),
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Center(
-                  child: Container(width: 40, height: 4,
-                      decoration: BoxDecoration(color: SynapseTheme.onSurfaceVariant, borderRadius: BorderRadius.circular(9))),
-                ),
-                const SizedBox(height: 20),
-                Row(children: [
-                  Container(
-                    width: 40, height: 40,
-                    decoration: BoxDecoration(
-                      color: broker.logoColor.withOpacity(0.12),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Center(child: Text(broker.logoText, style: SynapseTheme.headline(fontSize: 13, color: broker.logoColor))),
-                  ),
-                  const SizedBox(width: 12),
-                  Text(broker.name, style: SynapseTheme.headline(fontSize: 20)),
-                ]),
-                const SizedBox(height: 20),
-                _inputField(apiCtrl, 'MetaApi Token / API Key', Icons.key, obscure: true),
-                const SizedBox(height: 12),
-                _inputField(accountCtrl, 'Account ID / Login', Icons.account_balance),
-                const SizedBox(height: 24),
-                Row(children: [
-                  Expanded(
-                    child: OutlinedButton(
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: SynapseTheme.secondary,
-                        side: BorderSide(color: SynapseTheme.secondary.withOpacity(0.5)),
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                      ),
-                      onPressed: () {
-                        setState(() {
-                          broker.status = 'disconnected';
-                          broker.apiKey = '';
-                          broker.accountId = '';
-                        });
-                        Navigator.pop(ctx);
-                      },
-                      child: Text('DESCONECTAR', style: SynapseTheme.headline(fontSize: 13, color: SynapseTheme.secondary)),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: SynapseTheme.primaryContainer,
-                        foregroundColor: SynapseTheme.onPrimary,
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                      ),
-                      onPressed: () {
-                        setState(() {
-                          broker.apiKey = apiCtrl.text;
-                          broker.accountId = accountCtrl.text;
-                          if (apiCtrl.text.isNotEmpty) broker.status = 'connected';
-                        });
-                        Navigator.pop(ctx);
-                      },
-                      child: Text('GUARDAR', style: SynapseTheme.headline(fontSize: 13, color: SynapseTheme.onPrimary)),
-                    ),
-                  ),
-                ]),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  void _editPips(bool isTarget) {
-    final ctrl = TextEditingController(text: isTarget ? _targetPips.toInt().toString() : _stopLossPips.toInt().toString());
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: SynapseTheme.surfaceContainerHigh,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: Text(isTarget ? 'Take Profit Pips' : 'Stop Loss Pips', style: SynapseTheme.headline(fontSize: 18)),
-        content: TextField(
-          controller: ctrl,
-          keyboardType: TextInputType.number,
-          style: SynapseTheme.headline(fontSize: 18),
-          decoration: InputDecoration(
-            suffix: Text('pips', style: SynapseTheme.label()),
-            filled: true, fillColor: SynapseTheme.surfaceContainerLow,
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
-          ),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancelar')),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: SynapseTheme.primaryContainer),
-            onPressed: () {
-              final v = double.tryParse(ctrl.text) ?? (isTarget ? _targetPips : _stopLossPips);
-              setState(() => isTarget ? _targetPips = v : _stopLossPips = v);
-              Navigator.pop(ctx);
-            },
-            child: const Text('Guardar'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _inputField(TextEditingController ctrl, String hint, IconData icon, {bool obscure = false}) {
+  Widget _inputField(TextEditingController ctrl, String hint, IconData icon,
+      {bool obscure = false, Widget? suffix}) {
     return TextField(
       controller: ctrl,
       obscureText: obscure,
@@ -709,6 +682,7 @@ class _BrokerSettingsScreenState extends State<BrokerSettingsScreen> {
         hintText: hint,
         hintStyle: SynapseTheme.label(fontSize: 14, color: SynapseTheme.onSurfaceVariant),
         prefixIcon: Icon(icon, size: 18, color: SynapseTheme.onSurfaceVariant),
+        suffixIcon: suffix != null ? Padding(padding: const EdgeInsets.only(right: 12), child: suffix) : null,
         filled: true,
         fillColor: SynapseTheme.surfaceContainerLow,
         border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide.none),

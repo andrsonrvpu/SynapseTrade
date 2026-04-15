@@ -195,23 +195,30 @@ class _AnalyzeScreenState extends State<AnalyzeScreen> with SingleTickerProvider
                   const SizedBox(height: 20),
 
                   // ════════════════════════════════════════
-                  //  3. SIGNAL CARD (if signal exists)
+                  //  3. AUTO-TRADING BANNER
+                  // ════════════════════════════════════════
+                  _buildAutoTradingBanner(provider),
+
+                  const SizedBox(height: 16),
+
+                  // ════════════════════════════════════════
+                  //  4. SIGNAL CARD (if signal exists)
                   // ════════════════════════════════════════
                   _buildSignalSection(signal, isBuy, symbol, entryPrice, stopLoss, tp1, tp2, confidence),
 
                   const SizedBox(height: 20),
 
                   // ════════════════════════════════════════
-                  //  4. RISK MANAGEMENT
+                  //  5. RISK MANAGEMENT
                   // ════════════════════════════════════════
                   _buildRiskSection(),
 
                   const SizedBox(height: 20),
 
                   // ════════════════════════════════════════
-                  //  5. EXECUTE TRADE BUTTONS
+                  //  6. EXECUTE TRADE BUTTONS
                   // ════════════════════════════════════════
-                  _buildTradeButtons(isBuy, signal),
+                  _buildTradeButtons(isBuy, signal, provider),
 
                   const SizedBox(height: 40),
                 ],
@@ -602,11 +609,133 @@ class _AnalyzeScreenState extends State<AnalyzeScreen> with SingleTickerProvider
   }
 
   // ═══════════════════════════════════════════
+  //  AUTO-TRADING BANNER
+  // ═══════════════════════════════════════════
+  Widget _buildAutoTradingBanner(AppProvider provider) {
+    final autoOn = provider.autoTradingEnabled;
+    final status = provider.autoTradingStatus;
+
+    return GestureDetector(
+      onTap: () => provider.toggleAutoTrading(!autoOn),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 300),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        decoration: BoxDecoration(
+          color: autoOn
+              ? SynapseTheme.primaryContainer.withOpacity(0.1)
+              : SynapseTheme.surfaceContainerLow,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: autoOn
+                ? SynapseTheme.primaryContainer.withOpacity(0.35)
+                : Colors.white.withOpacity(0.06),
+          ),
+        ),
+        child: Row(children: [
+          Container(
+            width: 36, height: 36,
+            decoration: BoxDecoration(
+              color: autoOn
+                  ? SynapseTheme.primaryContainer.withOpacity(0.15)
+                  : SynapseTheme.surfaceContainerHigh,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Icon(
+              Icons.smart_toy_outlined,
+              size: 18,
+              color: autoOn ? SynapseTheme.primaryContainer : SynapseTheme.onSurfaceVariant,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(
+              autoOn ? 'TRADING AUTOMÁTICO IA — ACTIVO' : 'TRADING AUTOMÁTICO IA',
+              style: SynapseTheme.headline(
+                fontSize: 12,
+                color: autoOn ? SynapseTheme.primaryContainer : SynapseTheme.onSurfaceVariant,
+                letterSpacing: 0.5,
+              ),
+            ),
+            Text(
+              autoOn
+                  ? '${status.toUpperCase()} · ${provider.autoTradesExecuted} órdenes ejecutadas'
+                  : 'Toca para activar ejecución automática',
+              style: SynapseTheme.label(
+                fontSize: 11,
+                color: autoOn ? SynapseTheme.primaryContainer.withOpacity(0.8) : SynapseTheme.onSurfaceVariant,
+              ),
+            ),
+          ])),
+          // Toggle pill
+          AnimatedContainer(
+            duration: const Duration(milliseconds: 200),
+            width: 44, height: 24,
+            decoration: BoxDecoration(
+              color: autoOn ? SynapseTheme.primaryContainer : SynapseTheme.surfaceContainerHigh,
+              borderRadius: BorderRadius.circular(99),
+            ),
+            child: AnimatedAlign(
+              duration: const Duration(milliseconds: 200),
+              alignment: autoOn ? Alignment.centerRight : Alignment.centerLeft,
+              child: Container(
+                width: 20, height: 20,
+                margin: const EdgeInsets.symmetric(horizontal: 2),
+                decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle),
+              ),
+            ),
+          ),
+        ]),
+      ),
+    );
+  }
+
+  // ═══════════════════════════════════════════
   //  TRADE EXECUTION BUTTONS
   // ═══════════════════════════════════════════
-  Widget _buildTradeButtons(bool isBuy, TradeSignal? signal) {
+  Widget _buildTradeButtons(bool isBuy, TradeSignal? signal, AppProvider provider) {
+    final isDemo = provider.accountInfo['mode'] != 'live';
     return Column(
       children: [
+        // Broker status indicator
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          margin: const EdgeInsets.only(bottom: 12),
+          decoration: BoxDecoration(
+            color: provider.brokerConnected && !isDemo
+                ? const Color(0xFFFF4C6E).withOpacity(0.08)
+                : SynapseTheme.surfaceContainerHigh,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(
+              color: provider.brokerConnected && !isDemo
+                  ? const Color(0xFFFF4C6E).withOpacity(0.3)
+                  : Colors.white.withOpacity(0.06),
+            ),
+          ),
+          child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+            Container(
+              width: 6, height: 6,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: provider.brokerConnected && !isDemo
+                    ? const Color(0xFFFF4C6E)
+                    : SynapseTheme.primaryContainer,
+              ),
+            ),
+            const SizedBox(width: 8),
+            Text(
+              provider.brokerConnected && !isDemo
+                  ? '⚠️ MODO REAL — ${provider.brokerName}'
+                  : provider.brokerConnected ? 'DEMO — ${provider.brokerName}' : 'Sin broker — Modo Demo',
+              style: SynapseTheme.label(
+                fontSize: 11,
+                letterSpacing: 0.5,
+                color: provider.brokerConnected && !isDemo
+                    ? const Color(0xFFFF4C6E)
+                    : SynapseTheme.primaryContainer,
+              ),
+            ),
+          ]),
+        ),
         // BUY button
         _execButton(
           label: 'EJECUTAR ORDEN COMPRA',
