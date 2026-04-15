@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
 import '../theme/synapse_theme.dart';
 import '../widgets/glass_card.dart';
 

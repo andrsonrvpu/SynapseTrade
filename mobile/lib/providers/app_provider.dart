@@ -73,7 +73,7 @@ class AppProvider extends ChangeNotifier {
   TradeSignal? _latestSignal;
   
   // Real-time prices
-  Map<String, double> _currentPrices = {
+  final Map<String, double> _currentPrices = {
     "XAUUSD": 2745.50,
     "BTCUSD": 64000.00,
     "ETHUSD": 3412.00,

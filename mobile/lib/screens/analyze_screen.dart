@@ -5,7 +5,6 @@ import 'package:provider/provider.dart';
 import '../providers/app_provider.dart';
 import '../services/broker_service.dart';
 import '../theme/synapse_theme.dart';
-import '../widgets/glass_card.dart';
 import '../widgets/trading_view_widget.dart';
 
 /// Signal Analysis screen — TradingView chart + IA analysis + trade execution.
