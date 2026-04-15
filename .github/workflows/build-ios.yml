@@ -49,11 +49,11 @@ jobs:
         working-directory: mobile
         run: flutter analyze --no-fatal-infos --no-fatal-warnings
 
-      # ── Build sin firma (Debug/verificación) ──
-      - name: 🏗️ Build iOS (no codesign)
+      # ── Build Release sin firma (para instalar con Sideloadly) ──
+      - name: 🏗️ Build iOS Release (no codesign)
         working-directory: mobile
         run: |
-          flutter build ios --debug --no-codesign \
+          flutter build ios --release --no-codesign \
             --build-name=1.0.0 \
             --build-number=${{ github.run_number }}
 
