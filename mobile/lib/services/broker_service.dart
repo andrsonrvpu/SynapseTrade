@@ -8,7 +8,8 @@ import 'package:http/http.dart' as http;
 /// MetaApi documentation: https://metaapi.cloud/docs/client/
 /// Free tier: 1 account, unlimited API calls.
 class BrokerService {
-  static const String _backendUrl = 'http://localhost:8000';
+  // Use same backend as app_provider — local network IP
+  static const String _backendUrl = 'http://192.168.20.15:8000';
 
   String? _metaApiToken;
   String? _accountId;

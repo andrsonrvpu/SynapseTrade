@@ -227,13 +227,61 @@ class _AnalyzeScreenState extends State<AnalyzeScreen> with SingleTickerProvider
   }
 
   // ═══════════════════════════════════════════
-  //  CHART SECTION — TradingView embed
+  //  CHART SECTION — Symbol selector + TradingView
   // ═══════════════════════════════════════════
+  static const List<String> _symbols = [
+    'XAUUSD', 'EURUSD', 'GBPUSD', 'USDJPY',
+    'BTCUSDT', 'ETHUSDT', 'US30', 'NAS100', 'USOIL',
+  ];
+
   Widget _buildChartSection(String symbol, AppProvider provider) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Symbol selector row
+        // ── Symbol selector ──
+        SizedBox(
+          height: 38,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            itemCount: _symbols.length,
+            separatorBuilder: (_, __) => const SizedBox(width: 8),
+            itemBuilder: (context, i) {
+              final s = _symbols[i];
+              final selected = provider.selectedSymbol == s;
+              return GestureDetector(
+                onTap: () => provider.setSymbol(s),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 200),
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: selected
+                        ? SynapseTheme.primaryContainer.withOpacity(0.2)
+                        : SynapseTheme.surfaceContainerHigh,
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(
+                      color: selected
+                          ? SynapseTheme.primaryContainer.withOpacity(0.6)
+                          : Colors.white.withOpacity(0.07),
+                      width: selected ? 1.5 : 1,
+                    ),
+                  ),
+                  child: Text(
+                    s,
+                    style: SynapseTheme.headline(
+                      fontSize: 12,
+                      color: selected
+                          ? SynapseTheme.primaryContainer
+                          : SynapseTheme.onSurfaceVariant,
+                      letterSpacing: 0.5,
+                    ),
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+        const SizedBox(height: 12),
+        // ── Symbol + timeframe row ──
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [

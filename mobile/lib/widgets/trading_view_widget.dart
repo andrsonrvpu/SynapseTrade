@@ -1,15 +1,14 @@
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:webview_flutter/webview_flutter.dart';
 import '../theme/synapse_theme.dart';
 
-// Web-specific imports are done conditionally via stub files.
-// On web: uses HtmlElementView + dart:ui_web
-// On native: renders a styled placeholder
+// Web-specific imports via stub files
 import 'trading_view_web.dart' if (dart.library.io) 'trading_view_stub.dart';
 
 /// TradingView live chart widget.
-/// On Flutter Web: embeds a full TradingView Advanced Chart with real candles.
-/// On mobile: shows styled placeholder.
+/// On Flutter Web: embeds via HtmlElementView + dart:ui_web
+/// On iOS/Android: uses WebView with embedded TradingView HTML
 class TradingViewWidget extends StatefulWidget {
   final String symbol;
   final String timeframe;
@@ -28,6 +27,8 @@ class TradingViewWidget extends StatefulWidget {
 
 class TradingViewWidgetState extends State<TradingViewWidget> {
   late String _currentViewId;
+  WebViewController? _webController;
+  bool _webViewReady = false;
 
   @override
   void initState() {
@@ -35,7 +36,103 @@ class TradingViewWidgetState extends State<TradingViewWidget> {
     _currentViewId = tvViewId(widget.symbol);
     if (kIsWeb) {
       registerTradingViewIframe(widget.symbol, widget.timeframe, _currentViewId);
+    } else {
+      _initWebView();
     }
+  }
+
+  void _initWebView() {
+    final controller = WebViewController()
+      ..setJavaScriptMode(JavaScriptMode.unrestricted)
+      ..setBackgroundColor(const Color(0xFF0D0D0D))
+      ..setNavigationDelegate(NavigationDelegate(
+        onPageFinished: (_) {
+          if (mounted) setState(() => _webViewReady = true);
+        },
+      ))
+      ..loadHtmlString(_buildTradingViewHtml(widget.symbol, widget.timeframe));
+    setState(() => _webController = controller);
+  }
+
+  String _buildTradingViewHtml(String symbol, String timeframe) {
+    // Map symbol to TradingView format
+    final tvSymbol = _mapSymbol(symbol);
+    final tvInterval = timeframe;
+
+    return '''
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; background: #0D0D0D; overflow: hidden; }
+    #chart { width: 100%; height: 100%; }
+  </style>
+</head>
+<body>
+  <div id="chart"></div>
+  <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
+  <script type="text/javascript">
+    new TradingView.widget({
+      "autosize": true,
+      "symbol": "$tvSymbol",
+      "interval": "$tvInterval",
+      "timezone": "exchange",
+      "theme": "dark",
+      "style": "1",
+      "locale": "es",
+      "toolbar_bg": "#0D0D0D",
+      "enable_publishing": false,
+      "hide_top_toolbar": false,
+      "hide_legend": false,
+      "save_image": false,
+      "container_id": "chart",
+      "studies": [
+        "MASimple@tv-basicstudies",
+        "RSI@tv-basicstudies"
+      ],
+      "show_popup_button": false,
+      "popup_width": "1000",
+      "popup_height": "650",
+      "no_referral_id": true,
+      "overrides": {
+        "mainSeriesProperties.candleStyle.upColor": "#00E5B4",
+        "mainSeriesProperties.candleStyle.downColor": "#FF4C6E",
+        "mainSeriesProperties.candleStyle.borderUpColor": "#00E5B4",
+        "mainSeriesProperties.candleStyle.borderDownColor": "#FF4C6E",
+        "mainSeriesProperties.candleStyle.wickUpColor": "#00E5B4",
+        "mainSeriesProperties.candleStyle.wickDownColor": "#FF4C6E",
+        "paneProperties.background": "#0D0D0D",
+        "paneProperties.backgroundType": "solid",
+        "paneProperties.vertGridProperties.color": "#1A1A2E",
+        "paneProperties.horzGridProperties.color": "#1A1A2E",
+        "scalesProperties.textColor": "#888888"
+      }
+    });
+  </script>
+</body>
+</html>
+''';
+  }
+
+  String _mapSymbol(String symbol) {
+    const map = {
+      'XAUUSD': 'OANDA:XAUUSD',
+      'EURUSD': 'FX:EURUSD',
+      'GBPUSD': 'FX:GBPUSD',
+      'USDJPY': 'FX:USDJPY',
+      'BTCUSD': 'BINANCE:BTCUSDT',
+      'BTCUSDT': 'BINANCE:BTCUSDT',
+      'ETHUSD': 'BINANCE:ETHUSDT',
+      'ETHUSDT': 'BINANCE:ETHUSDT',
+      'US30': 'FOREXCOM:DJI',
+      'NAS100': 'NASDAQ:NDX',
+      'SPX500': 'SP:SPX',
+      'USOIL': 'TVC:USOIL',
+    };
+    return map[symbol] ?? 'FX:$symbol';
   }
 
   @override
@@ -45,73 +142,79 @@ class TradingViewWidgetState extends State<TradingViewWidget> {
       _currentViewId = tvViewId(widget.symbol);
       if (kIsWeb) {
         registerTradingViewIframe(widget.symbol, widget.timeframe, _currentViewId);
+        if (mounted) setState(() {});
+      } else {
+        // Reload WebView with new symbol
+        _webController?.loadHtmlString(
+          _buildTradingViewHtml(widget.symbol, widget.timeframe),
+        );
+        if (mounted) setState(() => _webViewReady = false);
       }
-      // Force rebuild with new view type
-      if (mounted) setState(() {});
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    if (!kIsWeb) {
-      return _buildMobilePlaceholder();
+    if (kIsWeb) {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(24),
+        child: SizedBox(
+          height: widget.height,
+          child: HtmlElementView(viewType: _currentViewId),
+        ),
+      );
     }
+
+    // Mobile: WebView with real TradingView chart
+    if (_webController == null) {
+      return _buildLoadingPlaceholder();
+    }
+
     return ClipRRect(
-      borderRadius: BorderRadius.circular(24),
+      borderRadius: BorderRadius.circular(20),
       child: SizedBox(
         height: widget.height,
-        child: HtmlElementView(viewType: _currentViewId),
+        child: Stack(
+          children: [
+            WebViewWidget(controller: _webController!),
+            if (!_webViewReady)
+              Container(
+                color: const Color(0xFF0D0D0D),
+                child: Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      CircularProgressIndicator(
+                        color: SynapseTheme.primaryContainer,
+                        strokeWidth: 2,
+                      ),
+                      const SizedBox(height: 12),
+                      Text(
+                        'Cargando gráfico ${widget.symbol}...',
+                        style: SynapseTheme.label(fontSize: 13),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }
 
-  Widget _buildMobilePlaceholder() {
+  Widget _buildLoadingPlaceholder() {
     return Container(
       height: widget.height,
       decoration: BoxDecoration(
         color: SynapseTheme.surfaceContainerLow,
-        borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: Colors.white.withOpacity(0.05)),
+        borderRadius: BorderRadius.circular(20),
       ),
-      child: Stack(children: [
-        Positioned.fill(
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(24),
-            child: CustomPaint(painter: _ChartBgPainter()),
-          ),
-        ),
-        Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
-          Icon(Icons.candlestick_chart, color: SynapseTheme.primaryContainer, size: 48),
-          const SizedBox(height: 12),
-          Text(widget.symbol, style: SynapseTheme.headline(fontSize: 20, color: SynapseTheme.primaryContainer)),
-          const SizedBox(height: 8),
-          Text('Live chart • Web only in debug mode', style: SynapseTheme.label(fontSize: 12)),
-        ])),
-      ]),
+      child: Center(
+        child: CircularProgressIndicator(color: SynapseTheme.primaryContainer),
+      ),
     );
   }
 }
 
 String tvViewId(String symbol) => 'tv-$symbol';
-
-class _ChartBgPainter extends CustomPainter {
-  @override
-  void paint(Canvas canvas, Size size) {
-    final linePaint = Paint()
-      ..color = SynapseTheme.primaryContainer.withOpacity(0.4)
-      ..strokeWidth = 2
-      ..style = PaintingStyle.stroke;
-    final path = Path()
-      ..moveTo(0, size.height * 0.6)
-      ..cubicTo(size.width * 0.25, size.height * 0.5, size.width * 0.45, size.height * 0.65, size.width * 0.65, size.height * 0.38)
-      ..cubicTo(size.width * 0.75, size.height * 0.32, size.width * 0.85, size.height * 0.42, size.width, size.height * 0.42);
-    canvas.drawPath(path, linePaint);
-    final gridPaint = Paint()..color = SynapseTheme.onSurfaceVariant.withOpacity(0.06)..strokeWidth = 1;
-    for (int i = 1; i < 5; i++) {
-      canvas.drawLine(Offset(0, size.height * i / 5), Offset(size.width, size.height * i / 5), gridPaint);
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter old) => false;
-}
