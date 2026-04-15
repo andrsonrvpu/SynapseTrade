@@ -93,9 +93,11 @@ class AppProvider extends ChangeNotifier {
     'margin': 0.0,
   };
 
-  // Base URLs - Adjust for emulator if needed
-  final String _baseUrl = 'http://127.0.0.1:8000/api/v1'; 
-  final String _wsUrl = 'ws://127.0.0.1:8000/api/v1/ws/prices';
+  // Base URLs - PC local IP for iPhone on same WiFi network
+  // Change 192.168.20.15 to your PC's IP if it changes (run: ipconfig)
+  final String _baseUrl = 'http://192.168.20.15:8000/api/v1'; 
+  final String _wsUrl = 'ws://192.168.20.15:8000/api/v1/ws/prices';
+
   
   final Map<String, String> _headers = {
     'X-API-KEY': 'synapse-dev-key-2026',
