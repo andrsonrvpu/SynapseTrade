@@ -1,0 +1,95 @@
+# SynapseTrade — Docker Compose
+# Orquesta el backend FastAPI + Redis (cache) + Nginx (proxy)
+#
+# Uso:
+#   docker compose up -d          → levantar todo en background
+#   docker compose logs -f        → ver logs en tiempo real
+#   docker compose down           → detener y eliminar contenedores
+#   docker compose build --no-cache → reconstruir imágenes
+
+version: '3.9'
+
+services:
+
+  # ── Backend FastAPI ──────────────────────────────────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: synapsetrade-backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      # Copia tu .env o define aquí las variables
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - API_SECRET_KEY=${API_SECRET_KEY:-synapse_secret_key_2024}
+      - METAAPI_TOKEN=${METAAPI_TOKEN:-}
+      - METAAPI_ACCOUNT_ID=${METAAPI_ACCOUNT_ID:-}
+      - REDIS_URL=redis://redis:6379
+      - PORT=8000
+      - HOST=0.0.0.0
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - synapse-net
+    volumes:
+      - ./backend:/app:ro   # Solo lectura en contenedor (dev mode: quita :ro)
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    labels:
+      - "com.synapsetrade.service=backend"
+
+  # ── Redis (Cache + WebSocket State) ─────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: synapsetrade-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    networks:
+      - synapse-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    labels:
+      - "com.synapsetrade.service=cache"
+
+  # ── Nginx (Reverse Proxy + CORS) ─────────────────────────────
+  nginx:
+    image: nginx:alpine
+    container_name: synapsetrade-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/certs:/etc/nginx/certs:ro   # Para SSL en producción
+    depends_on:
+      - backend
+    networks:
+      - synapse-net
+    labels:
+      - "com.synapsetrade.service=proxy"
+
+# ── Volumes ──────────────────────────────────────────────────
+volumes:
+  redis_data:
+    name: synapsetrade-redis-data
+
+# ── Networks ─────────────────────────────────────────────────
+networks:
+  synapse-net:
+    name: synapsetrade-network
+    driver: bridge

@@ -1,0 +1,53 @@
+# SynapseTrade - Git Ignore
+
+# ── Flutter / Dart ──
+mobile/.dart_tool/
+mobile/build/
+mobile/.flutter-plugins
+mobile/.flutter-plugins-dependencies
+mobile/.packages
+mobile/pubspec.lock
+
+# ── Android ──
+mobile/android/.gradle/
+mobile/android/app/build/
+mobile/android/build/
+mobile/android/local.properties
+*.apk
+*.aab
+
+# ── iOS ──
+mobile/ios/Pods/
+mobile/ios/.symlinks/
+mobile/ios/Flutter/Flutter.framework
+mobile/ios/Flutter/Flutter.podspec
+mobile/ios/Flutter/Generated.xcconfig
+mobile/ios/Flutter/ephemeral/
+mobile/ios/Flutter/App.framework
+mobile/ios/Flutter/app.flx
+
+# ── Backend ──
+backend/__pycache__/
+backend/.env
+backend/venv/
+*.pyc
+
+# ── IDE ──
+.idea/
+.vscode/
+*.iml
+*.swp
+
+# ── OS ──
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── Secrets ──
+*.keystore
+*.jks
+google-services.json
+GoogleService-Info.plist
+firebase_options.dart
+.env
+.env.local
