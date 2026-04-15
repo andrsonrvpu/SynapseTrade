@@ -117,9 +117,15 @@ class AppProvider extends ChangeNotifier {
   Map<String, dynamic> get accountInfo => _accountInfo;
 
   AppProvider() {
-    _fetchSignals();
-    _initWebSocket();
-    _fetchAccountInfo();
+    // Delay network calls so the app can render first
+    Future.delayed(const Duration(seconds: 2), () {
+      _fetchSignals();
+      _fetchAccountInfo();
+    });
+    // WebSocket connects later to avoid crash on startup
+    Future.delayed(const Duration(seconds: 4), () {
+      _initWebSocket();
+    });
   }
 
   void setCurrentIndex(int index) {
