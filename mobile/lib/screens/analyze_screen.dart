@@ -169,66 +169,63 @@ class _AnalyzeScreenState extends State<AnalyzeScreen> with SingleTickerProvider
 
     return Scaffold(
       backgroundColor: SynapseTheme.surface,
-      body: Stack(
-        children: [
-          // ── Main scrollable content ──
-          SingleChildScrollView(
-            physics: const BouncingScrollPhysics(),
-            padding: const EdgeInsets.only(top: 12, bottom: 100),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // ════════════════════════════════════════
-                  //  1. LIVE TRADING VIEW CHART
-                  // ════════════════════════════════════════
-                  _buildChartSection(symbol, provider),
+      body: SafeArea(
+        bottom: false,
+        child: Stack(
+          children: [
+            // ── Main scrollable content ──
+            SingleChildScrollView(
+              physics: const BouncingScrollPhysics(),
+              padding: const EdgeInsets.only(top: 16, bottom: 120),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // ════════════════════════════════════════
+                    //  1. LIVE TRADING VIEW CHART
+                    // ════════════════════════════════════════
+                    _buildChartSection(symbol, provider),
+                    const SizedBox(height: 16),
 
-                  const SizedBox(height: 16),
+                    // ════════════════════════════════════════
+                    //  2. ANALIZAR CON IA BUTTON
+                    // ════════════════════════════════════════
+                    _buildAnalyzeButton(provider),
+                    const SizedBox(height: 16),
 
-                  // ════════════════════════════════════════
-                  //  2. ANALIZAR CON IA BUTTON
-                  // ════════════════════════════════════════
-                  _buildAnalyzeButton(provider),
+                    // ════════════════════════════════════════
+                    //  3. AUTO-TRADING BANNER
+                    // ════════════════════════════════════════
+                    _buildAutoTradingBanner(provider),
+                    const SizedBox(height: 16),
 
-                  const SizedBox(height: 20),
+                    // ════════════════════════════════════════
+                    //  4. SIGNAL CARD
+                    // ════════════════════════════════════════
+                    _buildSignalSection(signal, isBuy, symbol, entryPrice, stopLoss, tp1, tp2, confidence),
+                    const SizedBox(height: 20),
 
-                  // ════════════════════════════════════════
-                  //  3. AUTO-TRADING BANNER
-                  // ════════════════════════════════════════
-                  _buildAutoTradingBanner(provider),
+                    // ════════════════════════════════════════
+                    //  5. RISK MANAGEMENT
+                    // ════════════════════════════════════════
+                    _buildRiskSection(),
+                    const SizedBox(height: 20),
 
-                  const SizedBox(height: 16),
-
-                  // ════════════════════════════════════════
-                  //  4. SIGNAL CARD (if signal exists)
-                  // ════════════════════════════════════════
-                  _buildSignalSection(signal, isBuy, symbol, entryPrice, stopLoss, tp1, tp2, confidence),
-
-                  const SizedBox(height: 20),
-
-                  // ════════════════════════════════════════
-                  //  5. RISK MANAGEMENT
-                  // ════════════════════════════════════════
-                  _buildRiskSection(),
-
-                  const SizedBox(height: 20),
-
-                  // ════════════════════════════════════════
-                  //  6. EXECUTE TRADE BUTTONS
-                  // ════════════════════════════════════════
-                  _buildTradeButtons(isBuy, signal, provider),
-
-                  const SizedBox(height: 40),
-                ],
+                    // ════════════════════════════════════════
+                    //  6. EXECUTE TRADE BUTTONS
+                    // ════════════════════════════════════════
+                    _buildTradeButtons(isBuy, signal, provider),
+                    const SizedBox(height: 40),
+                  ],
+                ),
               ),
             ),
-          ),
 
-          // ── Executing overlay ──
-          if (_isExecuting) _buildExecutingOverlay(isBuy),
-        ],
+            // ── Executing overlay ──
+            if (_isExecuting) _buildExecutingOverlay(isBuy),
+          ],
+        ),
       ),
     );
   }
