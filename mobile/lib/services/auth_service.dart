@@ -1,46 +1,88 @@
+import 'dart:async';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 
-/// Firebase Auth service — handles Google, email/password, and user profiles.
+/// Firebase Auth service — google_sign_in v7 + Firebase Auth.
 class AuthService extends ChangeNotifier {
   final FirebaseAuth _auth = FirebaseAuth.instance;
-  final GoogleSignIn _googleSignIn = GoogleSignIn();
   final FirebaseFirestore _db = FirebaseFirestore.instance;
+
+  bool _googleInitialized = false;
 
   User? get currentUser => _auth.currentUser;
   bool get isLoggedIn => _auth.currentUser != null;
   Stream<User?> get authStateChanges => _auth.authStateChanges();
 
-  // ── Google Sign-In ─────────────────────────────────────────────────────────
+  // ── Initialize GoogleSignIn (must call once before authenticate) ────────────
+  Future<void> _ensureGoogleInitialized() async {
+    if (!_googleInitialized) {
+      await GoogleSignIn.instance.initialize();
+      _googleInitialized = true;
+    }
+  }
+
+  // ── Google Sign-In (v7 API) ────────────────────────────────────────────────
   Future<AuthResult> signInWithGoogle() async {
     try {
-      final GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
-      if (googleUser == null) {
+      await _ensureGoogleInitialized();
+
+      // Listen for the sign-in event from the stream
+      final Completer<GoogleSignInAccount?> completer = Completer();
+
+      // Listen to authentication events stream
+      late StreamSubscription sub;
+      sub = GoogleSignIn.instance.authenticationEvents.listen(
+        (event) {
+          sub.cancel();
+          if (event is GoogleSignInAuthenticationEventSignIn) {
+            completer.complete(event.user);
+          } else {
+            completer.complete(null);
+          }
+        },
+        onError: (e) {
+          sub.cancel();
+          completer.completeError(e);
+        },
+      );
+
+      // Trigger authentication
+      final result = await GoogleSignIn.instance.authenticate();
+      if (result == null) {
+        sub.cancel();
         return AuthResult.cancelled();
       }
 
-      final GoogleSignInAuthentication googleAuth =
-          await googleUser.authentication;
+      // Wait for stream or use result directly
+      GoogleSignInAccount? googleUser;
+      if (!completer.isCompleted) {
+        completer.complete(result);
+      }
+      googleUser = await completer.future.timeout(
+        const Duration(seconds: 10),
+        onTimeout: () => result,
+      );
 
+      if (googleUser == null) return AuthResult.cancelled();
+
+      // Get ID token from authentication
+      final googleAuth = googleUser.authentication;
       final credential = GoogleAuthProvider.credential(
-        accessToken: googleAuth.accessToken,
         idToken: googleAuth.idToken,
       );
 
       final UserCredential userCredential =
           await _auth.signInWithCredential(credential);
 
-      // Save/update user profile in Firestore
       await _saveUserProfile(userCredential.user!);
-
       notifyListeners();
       return AuthResult.success(userCredential.user!);
     } on FirebaseAuthException catch (e) {
       return AuthResult.error(_mapFirebaseError(e.code));
     } catch (e) {
-      return AuthResult.error('Error al iniciar sesión con Google: $e');
+      return AuthResult.error('Error con Google: $e');
     }
   }
 
@@ -77,15 +119,15 @@ class AuthService extends ChangeNotifier {
         password: password,
       );
 
-      // Update display name
       await userCredential.user!.updateDisplayName(displayName);
       await userCredential.user!.reload();
-
-      // Save profile to Firestore
-      await _saveUserProfile(userCredential.user!, name: displayName);
+      await _saveUserProfile(
+        _auth.currentUser ?? userCredential.user!,
+        name: displayName,
+      );
 
       notifyListeners();
-      return AuthResult.success(userCredential.user!);
+      return AuthResult.success(_auth.currentUser ?? userCredential.user!);
     } on FirebaseAuthException catch (e) {
       return AuthResult.error(_mapFirebaseError(e.code));
     } catch (e) {
@@ -97,7 +139,8 @@ class AuthService extends ChangeNotifier {
   Future<AuthResult> sendPasswordReset(String email) async {
     try {
       await _auth.sendPasswordResetEmail(email: email.trim());
-      return AuthResult.success(null, message: 'Correo de recuperación enviado.');
+      return AuthResult.success(null,
+          message: 'Correo de recuperación enviado.');
     } on FirebaseAuthException catch (e) {
       return AuthResult.error(_mapFirebaseError(e.code));
     }
@@ -105,7 +148,11 @@ class AuthService extends ChangeNotifier {
 
   // ── Sign Out ───────────────────────────────────────────────────────────────
   Future<void> signOut() async {
-    await _googleSignIn.signOut();
+    try {
+      if (_googleInitialized) {
+        await GoogleSignIn.instance.signOut();
+      }
+    } catch (_) {}
     await _auth.signOut();
     notifyListeners();
   }
@@ -116,7 +163,6 @@ class AuthService extends ChangeNotifier {
     final doc = await ref.get();
 
     if (!doc.exists) {
-      // New user
       await ref.set({
         'uid': user.uid,
         'email': user.email,
@@ -134,7 +180,6 @@ class AuthService extends ChangeNotifier {
         'winRate': 0.0,
       });
     } else {
-      // Returning user — update last login
       await ref.update({
         'lastLogin': FieldValue.serverTimestamp(),
         'photoURL': user.photoURL,
@@ -142,7 +187,6 @@ class AuthService extends ChangeNotifier {
     }
   }
 
-  // ── Get User Profile from Firestore ───────────────────────────────────────
   Future<Map<String, dynamic>?> getUserProfile() async {
     final user = _auth.currentUser;
     if (user == null) return null;
@@ -150,7 +194,6 @@ class AuthService extends ChangeNotifier {
     return doc.data();
   }
 
-  // ── Update broker credentials in Firestore ────────────────────────────────
   Future<void> saveBrokerCredentials({
     required String token,
     required String accountId,
@@ -163,7 +206,6 @@ class AuthService extends ChangeNotifier {
     });
   }
 
-  // ── Save trading stats ─────────────────────────────────────────────────────
   Future<void> updateTradingStats({
     required double profit,
     required bool win,
@@ -176,7 +218,6 @@ class AuthService extends ChangeNotifier {
     });
   }
 
-  // ── Error mapping ──────────────────────────────────────────────────────────
   String _mapFirebaseError(String code) {
     switch (code) {
       case 'user-not-found':
@@ -203,7 +244,6 @@ class AuthService extends ChangeNotifier {
   }
 }
 
-/// Result object for auth operations.
 class AuthResult {
   final bool success;
   final bool cancelled;
