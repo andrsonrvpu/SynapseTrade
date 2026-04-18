@@ -23,10 +23,31 @@ class AuthService extends ChangeNotifier {
     }
   }
 
-  // ── Google Sign-In (v7 API) ────────────────────────────────────────────────
+  // ── Google Sign-In (v7 API for Mobile, Popup for Web) ──────────────────────
   Future<AuthResult> signInWithGoogle() async {
     try {
-      await _ensureGoogleInitialized();
+      if (kIsWeb) {
+        // En Web, FirebaseAuth provee un flujo directo mucho más estable
+        final googleProvider = GoogleAuthProvider();
+        final UserCredential userCredential = 
+            await _auth.signInWithPopup(googleProvider);
+        
+        await _saveUserProfile(userCredential.user!);
+        notifyListeners();
+        return AuthResult.success(userCredential.user!);
+      }
+
+      // ── Flujo para Dispositivos Móviles (iOS/Android) usando google_sign_in v7 ──
+      try {
+        await _ensureGoogleInitialized();
+      } catch (e) {
+        // Ignorar si ya fue inicializado
+        if (e is StateError && e.message.contains('init() has already been called')) {
+           _googleInitialized = true;
+        } else {
+           rethrow;
+        }
+      }
 
       // Listen for the sign-in event from the stream
       final Completer<GoogleSignInAccount?> completer = Completer();
