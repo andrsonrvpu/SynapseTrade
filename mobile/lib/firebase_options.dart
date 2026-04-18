@@ -36,6 +36,7 @@ class DefaultFirebaseOptions {
     messagingSenderId: '326007010368',
     projectId: 'synapsetradedev-1',
     storageBucket: 'synapsetradedev-1.firebasestorage.app',
+    iosClientId: '326007010368-4dc7i37lt1riojrg9ditd065d8qs73a3.apps.googleusercontent.com',
     iosBundleId: 'com.synapsetrade.synapseTrade',
   );
 

@@ -420,18 +420,23 @@ class _LoginScreenState extends State<LoginScreen>
         child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
           // Google logo in SVG colors
           Container(
-            width: 22, height: 22,
+            width: 24, height: 24,
             decoration: BoxDecoration(
               color: Colors.white,
-              borderRadius: BorderRadius.circular(4),
+              shape: BoxShape.circle,
             ),
-            child: Center(
-              child: Text('G',
-                style: TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.bold,
-                  color: const Color(0xFF4285F4),
-                ),
+            padding: const EdgeInsets.all(4),
+            child: Image.network(
+              'https://upload.wikimedia.org/wikipedia/commons/thumb/c/c1/Google_%22G%22_logo.svg/120px-Google_%22G%22_logo.svg.png',
+              fit: BoxFit.contain,
+              errorBuilder: (_, __, ___) => const Center(
+                child: Text('G', 
+                  style: TextStyle(
+                    fontSize: 14, 
+                    fontWeight: FontWeight.bold, 
+                    color: Color(0xFF4285F4)
+                  )
+                )
               ),
             ),
           ),
