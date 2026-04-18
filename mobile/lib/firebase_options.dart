@@ -29,26 +29,29 @@ class DefaultFirebaseOptions {
   }
 
   // ── iOS ──────────────────────────────────────────────────────────────────
-  // Get from: Firebase Console → Project Settings → Your apps → iOS → GoogleService-Info.plist
+
   static const FirebaseOptions ios = FirebaseOptions(
-    apiKey: 'REPLACE_WITH_IOS_API_KEY',
-    appId: 'REPLACE_WITH_IOS_APP_ID',
-    messagingSenderId: 'REPLACE_WITH_SENDER_ID',
-    projectId: 'synapsetrade-app',
-    storageBucket: 'synapsetrade-app.appspot.com',
-    iosBundleId: 'com.synapsetrade.app',
-    iosClientId: 'REPLACE_WITH_IOS_CLIENT_ID',
+    apiKey: 'AIzaSyDNNeDCJ3b3Tc1W-w6AFTCpwcGHZV_hHBw',
+    appId: '1:326007010368:ios:604a4207d5936b0c969ba5',
+    messagingSenderId: '326007010368',
+    projectId: 'synapsetradedev-1',
+    storageBucket: 'synapsetradedev-1.firebasestorage.app',
+    iosBundleId: 'com.synapsetrade.synapseTrade',
   );
 
+  // Get from: Firebase Console → Project Settings → Your apps → iOS → GoogleService-Info.plist
+
   // ── Android ───────────────────────────────────────────────────────────────
-  // Get from: Firebase Console → Project Settings → Your apps → Android → google-services.json
+
   static const FirebaseOptions android = FirebaseOptions(
-    apiKey: 'REPLACE_WITH_ANDROID_API_KEY',
-    appId: 'REPLACE_WITH_ANDROID_APP_ID',
-    messagingSenderId: 'REPLACE_WITH_SENDER_ID',
-    projectId: 'synapsetrade-app',
-    storageBucket: 'synapsetrade-app.appspot.com',
+    apiKey: 'AIzaSyDmSIIeXAPW1Tj5LoctnAijg6-8Pl7MsoY',
+    appId: '1:326007010368:android:b04da1c3caec1a24969ba5',
+    messagingSenderId: '326007010368',
+    projectId: 'synapsetradedev-1',
+    storageBucket: 'synapsetradedev-1.firebasestorage.app',
   );
+
+  // Get from: Firebase Console → Project Settings → Your apps → Android → google-services.json
 
   // ── Web ───────────────────────────────────────────────────────────────────
   static const FirebaseOptions web = FirebaseOptions(
