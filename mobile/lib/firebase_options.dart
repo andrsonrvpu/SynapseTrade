@@ -54,15 +54,16 @@ class DefaultFirebaseOptions {
 
   // Get from: Firebase Console → Project Settings → Your apps → Android → google-services.json
 
-  // ── Web ───────────────────────────────────────────────────────────────────
   static const FirebaseOptions web = FirebaseOptions(
-    apiKey: 'REPLACE_WITH_WEB_API_KEY',
-    appId: 'REPLACE_WITH_WEB_APP_ID',
-    messagingSenderId: 'REPLACE_WITH_SENDER_ID',
-    projectId: 'synapsetrade-app',
-    storageBucket: 'synapsetrade-app.appspot.com',
-    authDomain: 'synapsetrade-app.firebaseapp.com',
+    apiKey: 'AIzaSyAcK_4rZKuyYQKRBdWmWxIiqbnH9jHhNuQ',
+    appId: '1:326007010368:web:c0a1e21b072022fc969ba5',
+    messagingSenderId: '326007010368',
+    projectId: 'synapsetradedev-1',
+    authDomain: 'synapsetradedev-1.firebaseapp.com',
+    storageBucket: 'synapsetradedev-1.firebasestorage.app',
   );
+
+  // ── Web ───────────────────────────────────────────────────────────────────
 
   // ── macOS (if needed) ─────────────────────────────────────────────────────
   static const FirebaseOptions macos = FirebaseOptions(
