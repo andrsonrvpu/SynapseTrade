@@ -101,6 +101,14 @@ jobs:
             --build-number=${{ github.run_number }} \
             --export-options-plist=ios/ExportOptions.plist
 
+      - name: 📦 Package .ipa for Sideloading
+        working-directory: mobile
+        run: |
+          mkdir -p build/ios/iphoneos/Payload
+          cp -rn build/ios/iphoneos/Runner.app build/ios/iphoneos/Payload/
+          cd build/ios/iphoneos && zip -r ../../../SynapseTrade.ipa Payload
+          cd ../../../ && mv SynapseTrade.ipa mobile/build/ios/ipa/ || true
+
       - name: 📤 Upload iOS artifact
         uses: actions/upload-artifact@v4
         with:
@@ -108,6 +116,7 @@ jobs:
           path: |
             mobile/build/ios/iphoneos/Runner.app
             mobile/build/ios/ipa/*.ipa
+            SynapseTrade.ipa
           retention-days: 14
 
       - name: ✅ Build Summary
